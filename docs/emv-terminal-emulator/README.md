@@ -49,11 +49,50 @@ The design is client-heavy to respect PM3Easy flash limits (256 KB option), reus
 | Card-side sim (existing) | `armsrc/emvsim.c`, `emv scan` JSON | Out of scope except interoperability |
 | Reference architecture | [ntufar/EMV](https://github.com/ntufar/EMV) | Phase model, not direct code import |
 
+## v2 Enhancement Program (Post-MVP)
+
+Milestones **M1–M6 (Phases 0–8)** are implemented in client code. The **v2 program** specifies everything needed to reach a lab-grade, CI-backed, multi-scheme terminal:
+
+| Start here | Purpose |
+|------------|---------|
+| [FEATURE-CATALOG-v2.md](./FEATURE-CATALOG-v2.md) | Master index of 39 features (F-001–F-040) |
+| [IMPLEMENTATION-PLAN-v2.md](./IMPLEMENTATION-PLAN-v2.md) | Milestones M7–M14, waves A–D |
+| [MILESTONES-v2.md](./MILESTONES-v2.md) | Release gates and demo scripts |
+| [TEST-PLAN-v2-manual.md](./TEST-PLAN-v2-manual.md) | 130+ manual test cases |
+| [TEST-PLAN-v2-automated.md](./TEST-PLAN-v2-automated.md) | 180+ automated test IDs |
+| [QA-CHECKLIST-v2.md](./QA-CHECKLIST-v2.md) | Pre-release sign-off |
+
+### v2 Technical Specs
+
+| Spec | Features covered |
+|------|------------------|
+| [SPEC-v2-host-online.md](./SPEC-v2-host-online.md) | Host-sim, ARQC/ARPC, TCP acquirer, online PIN |
+| [SPEC-v2-scheme-kernels.md](./SPEC-v2-scheme-kernels.md) | Profiles, kernels, MSD, test matrix |
+| [SPEC-v2-cvm-pin.md](./SPEC-v2-cvm-pin.md) | Interactive PIN, zeroization audit |
+| [SPEC-v2-scripts-data.md](./SPEC-v2-scripts-data.md) | Scripts 71/72, session merge, redaction |
+| [SPEC-v2-cli-ux.md](./SPEC-v2-cli-ux.md) | CLI overrides, banner, capabilities |
+| [SPEC-v2-oda-crypto.md](./SPEC-v2-oda-crypto.md) | CAPK, fDDA, terminal CDA |
+| [SPEC-v2-restrictions-risk.md](./SPEC-v2-restrictions-risk.md) | Exception file |
+| [SPEC-v2-testing-ci.md](./SPEC-v2-testing-ci.md) | Mock APDU, golden fixtures, parity |
+| [SPEC-v2-integration.md](./SPEC-v2-integration.md) | emv sim, Lua, reader, contact |
+| [SPEC-v2-trace-replay.md](./SPEC-v2-trace-replay.md) | PCAP, replay, timing |
+
+**Deferred:** firmware WTX assist (F-027) — only if contactless timing fails on measured hardware.
+
+---
+
 ## Repository / Document Map
 
 ```text
 docs/emv-terminal-emulator/
 ├── README.md                      ← you are here
+├── FEATURE-CATALOG-v2.md          v2 master feature index
+├── IMPLEMENTATION-PLAN-v2.md      M7–M14 build order
+├── MILESTONES-v2.md               v2 delivery gates
+├── TEST-PLAN-v2-manual.md         v2 manual tests
+├── TEST-PLAN-v2-automated.md      v2 CI / unit tests
+├── QA-CHECKLIST-v2.md             v2 ship criteria
+├── SPEC-v2-*.md                   v2 technical specs (10 files)
 ├── PRODUCT-OVERVIEW.md            Business scope, staged versions
 ├── ARCHITECTURE.md                System design, data flow
 ├── SPEC-core-loop.md              Terminal transaction phases
@@ -86,12 +125,15 @@ Related existing docs:
 
 ## Current Build Priorities
 
-1. **M1 — Terminal MVP on client only** — `emv terminal run` wrapping existing `exec` steps plus explicit session object and outcome reporting.
-2. **M2 — PIN / CVM** — VERIFY command, enciphered PIN block formatting, TVR/CVMR updates ([SPEC-advanced-terminal-features.md](./SPEC-advanced-terminal-features.md)).
-3. **M3 — TAA + AC2** — full offline decision path through second Generate AC.
-4. **M4 — PM3Easy firmware validation** — confirm default PM3GENERIC image still fits; add `SKIP_*` profile if needed.
-5. **M5 — Online lab stub** — ARPC / external auth; Interac `8840` ARPC-RC ([SPEC-cryptography-keys.md](./SPEC-cryptography-keys.md)).
-6. **Scheme packs** — Interac + Visa + MC profiles ([SPEC-schemes-reference.md](./SPEC-schemes-reference.md)).
+**Done (M1–M6):** Full terminal phase pipeline, CVM, TAA, online stub, session JSON.
+
+**Next (v2 Wave A — P0):**
+
+1. **M7 — Host simulator** — real ARQC verify + ARPC ([SPEC-v2-host-online.md](./SPEC-v2-host-online.md))
+2. **M8 — Scheme profiles** — `--profile interac|visa|mc|auto`
+3. **M9 — Mock APDU + golden CI** — no hardware regression ([SPEC-v2-testing-ci.md](./SPEC-v2-testing-ci.md))
+
+See [IMPLEMENTATION-PLAN-v2.md](./IMPLEMENTATION-PLAN-v2.md) for M10–M14.
 
 ## Known Gaps
 
@@ -126,4 +168,5 @@ make -j && make client/client
 ./pm3 -- emv scan -at card.json
 ```
 
-See [IMPLEMENTATION-PLAN.md](./IMPLEMENTATION-PLAN.md) for the full build sequence.
+See [IMPLEMENTATION-PLAN-v2.md](./IMPLEMENTATION-PLAN-v2.md) for the v2 build sequence.  
+MVP sequence: [IMPLEMENTATION-PLAN.md](./IMPLEMENTATION-PLAN.md).
