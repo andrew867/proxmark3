@@ -36,6 +36,7 @@ static const char *outcome_names[] = {
     "approved_offline",
     "declined",
     "online_required",
+    "approved_online",
     "aborted",
 };
 

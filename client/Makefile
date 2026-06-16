@@ -837,15 +837,24 @@ SRCS =  mifare/aiddesfire.c \
         emv/terminal/emv_term_ctx.c \
         emv/terminal/emv_term_profile.c \
         emv/terminal/emv_term_session.c \
+        emv/terminal/emv_term_tvr.c \
+        emv/terminal/emv_term_load.c \
         emv/terminal/emv_transaction.c \
         emv/terminal/phase_init.c \
         emv/terminal/phase_oda.c \
+        emv/terminal/phase_restrict.c \
         emv/terminal/phase_cvm.c \
+        emv/terminal/phase_trm.c \
+        emv/terminal/phase_taa.c \
+        emv/terminal/phase_caa.c \
+        emv/terminal/phase_online.c \
+        emv/terminal/phase_complete.c \
         emv/terminal/emv_terminal.c \
         emv/terminal/emv_term_cmd.c \
         emv/test/crypto_test.c\
         emv/test/cryptotest.c\
         emv/test/cda_test.c\
+        emv/test/terminal_taa_test.c\
         emv/test/dda_test.c\
         emv/test/sda_test.c\
         fido/additional_ca.c \

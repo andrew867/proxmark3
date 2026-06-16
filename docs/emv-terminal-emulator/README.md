@@ -10,10 +10,13 @@ The design is client-heavy to respect PM3Easy flash limits (256 KB option), reus
 
 | Area | Status |
 |------|--------|
-| Planning docs | **Draft — this bundle** |
+| Planning docs | **Complete — this bundle** |
 | Client EMV reader commands (`emv exec`, `emv scan`, `emv reader`) | **Partial — exists today** |
-| PIN verification (VERIFY / enciphered PIN) | **Not implemented** |
-| Full terminal phase engine (TAA, CAA, AC2, issuer scripts) | **Not implemented** |
+| Terminal phase engine (`emv terminal run/step`) | **Implemented** |
+| PIN verification (VERIFY / enciphered PIN) | **Implemented (`emv terminal pin`, CVM phase)** |
+| Restrictions, TRM, TAA, CAA (GEN AC1) | **Implemented** |
+| Online lab stub (EXTERNAL AUTH, AC2, issuer script 71) | **Implemented (`emv terminal online`)** |
+| Scan JSON load for offline testing | **Implemented (`emv terminal load`)** |
 | Firmware terminal assist (`emvsim.c` is relay/card-side) | **Not implemented** |
 | PM3Easy 256 KB firmware fit | **Not validated** |
 
@@ -98,7 +101,7 @@ Related existing docs:
 - Full scheme-specific kernels (Visa qVSDC vs MC M/Chip nuances) need per-AID profiles.
 - `emvsim.c` today implements relay/card-side, not terminal-side — must not be conflated.
 
-## Quick Start (after implementation)
+## Quick Start
 
 ```bash
 # PM3Easy typical Makefile.platform
@@ -107,11 +110,17 @@ LED_ORDER=PM3EASY
 
 make -j && make client/client
 
-# Lab terminal transaction (contactless)
-./pm3 -- emv terminal run -j -a -t --amount 100
+# Full terminal transaction (contactless)
+./pm3 -- emv terminal run -satj -o /tmp/session.json --qvsdc
 
-# PIN verify step (once implemented)
+# PIN verify (lab test cards only)
 ./pm3 -- emv terminal pin --offline 1234
+
+# Online completion after ARQC
+./pm3 -- emv terminal online --session /tmp/session.json --arpc <hex> --arpc-rc 8840
+
+# Load card from prior scan (offline phase testing)
+./pm3 -- emv terminal load card.json -o card_session.json
 
 # Scan then emulate card (existing)
 ./pm3 -- emv scan -at card.json

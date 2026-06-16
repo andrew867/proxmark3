@@ -414,3 +414,29 @@ bool ParamLoadFromJson(struct tlvdb *tlv) {
     return ok;
 }
 
+int JsonLoadApplicationData(json_t *root, struct tlvdb *tlv) {
+    if (!root || !tlv) {
+        return PM3_EINVARG;
+    }
+
+    json_t *appdata = json_path_get(root, "$.ApplicationData");
+    if (!appdata || !json_is_object(appdata)) {
+        return PM3_SUCCESS;
+    }
+
+    int loaded = 0;
+    for (int i = 0; i < (int)ARRAYLEN(ApplicationData); i++) {
+        if (ApplicationData[i].Tag == 0) {
+            break;
+        }
+        uint8_t buf[512] = {0};
+        size_t buflen = 0;
+        if (JsonLoadBufAsHex(appdata, ApplicationData[i].Name, buf, sizeof(buf), &buflen) == 0 && buflen) {
+            tlvdb_change_or_add_node(tlv, ApplicationData[i].Tag, buflen, buf);
+            loaded++;
+        }
+    }
+
+    return loaded > 0 ? PM3_SUCCESS : PM3_SUCCESS;
+}
+

@@ -12,47 +12,40 @@
 #include "emv_terminal.h"
 #include "phase_init.h"
 #include "phase_oda.h"
+#include "phase_restrict.h"
 #include "phase_cvm.h"
+#include "phase_trm.h"
+#include "phase_taa.h"
+#include "phase_caa.h"
+#include "phase_online.h"
+#include "phase_complete.h"
 #include "emv_transaction.h"
 #include "emv_term_session.h"
 #include "comms.h"
 #include "ui.h"
 #include <string.h>
 
-static int phase_restrict_run(emv_term_ctx_t *ctx) {
-    (void)ctx;
-    return PM3_ENOTIMPL;
-}
-
-static int phase_trm_run(emv_term_ctx_t *ctx) {
-    (void)ctx;
-    return PM3_ENOTIMPL;
-}
-
-static int phase_taa_run(emv_term_ctx_t *ctx) {
-    (void)ctx;
-    return PM3_ENOTIMPL;
-}
-
-static int phase_caa_run(emv_term_ctx_t *ctx) {
-    return emv_transaction_genac1(ctx);
-}
-
-static int phase_online_run(emv_term_ctx_t *ctx) {
-    (void)ctx;
-    return PM3_ENOTIMPL;
-}
-
-static int phase_complete_run(emv_term_ctx_t *ctx) {
-    (void)ctx;
-    return PM3_SUCCESS;
-}
-
 static bool stop_after_phase(const emv_term_ctx_t *ctx, emv_term_phase_t phase) {
     if (!ctx->opts.stop_after || !ctx->opts.stop_after[0]) {
         return false;
     }
     return strcmp(ctx->opts.stop_after, emv_term_phase_name(phase)) == 0;
+}
+
+static bool should_run_online(const emv_term_ctx_t *ctx) {
+    if (!ctx->ac1_performed || (ctx->ac1_cid & 0xC0) != EMVAC_ARQC_BYTE) {
+        return false;
+    }
+    if (ctx->opts.auto_online) {
+        return true;
+    }
+    if (ctx->opts.arc && ctx->opts.arc[0]) {
+        return true;
+    }
+    if (ctx->opts.arpc && ctx->opts.arpc[0]) {
+        return true;
+    }
+    return false;
 }
 
 int emv_terminal_step(emv_term_ctx_t *ctx, emv_term_phase_t phase) {
@@ -102,6 +95,36 @@ int emv_terminal_step(emv_term_ctx_t *ctx, emv_term_phase_t phase) {
     return res;
 }
 
+static int run_pipeline_phase(emv_term_ctx_t *ctx, emv_term_phase_t phase, int *last_res) {
+    int res = emv_terminal_step(ctx, phase);
+
+    if (res && phase == EMV_PHASE_CVM && res == PM3_ESOFT) {
+        PrintAndLogEx(WARNING, "CVM phase failed — continuing for lab visibility");
+        *last_res = PM3_SUCCESS;
+    } else if (res && phase == EMV_PHASE_ONLINE && res == PM3_ESOFT) {
+        PrintAndLogEx(WARNING, "Online phase failed — continuing to completion");
+        if (ctx->outcome == EMV_OUTCOME_UNKNOWN) {
+            ctx->outcome = EMV_OUTCOME_ONLINE_REQUIRED;
+        }
+        *last_res = PM3_SUCCESS;
+    } else if (res) {
+        *last_res = res;
+        if (ctx->outcome == EMV_OUTCOME_UNKNOWN) {
+            ctx->outcome = EMV_OUTCOME_ABORTED;
+        }
+        return res;
+    } else {
+        *last_res = PM3_SUCCESS;
+    }
+
+    if (stop_after_phase(ctx, phase)) {
+        PrintAndLogEx(INFO, "Stopped after phase: %s", emv_term_phase_name(phase));
+        return 1;
+    }
+
+    return 0;
+}
+
 int emv_terminal_run(emv_term_ctx_t *ctx) {
     if (!ctx) {
         return PM3_EINVARG;
@@ -110,42 +133,41 @@ int emv_terminal_run(emv_term_ctx_t *ctx) {
     emv_term_phase_t pipeline[] = {
         EMV_PHASE_INIT,
         EMV_PHASE_ODA,
+        EMV_PHASE_RESTRICT,
         EMV_PHASE_CVM,
+        EMV_PHASE_TRM,
+        EMV_PHASE_TAA,
         EMV_PHASE_CAA,
-        EMV_PHASE_COMPLETE,
     };
 
     int last_res = PM3_SUCCESS;
 
     for (size_t i = 0; i < sizeof(pipeline) / sizeof(pipeline[0]); i++) {
-        emv_term_phase_t phase = pipeline[i];
-        int res = emv_terminal_step(ctx, phase);
-        if (res == PM3_ENOTIMPL && phase != EMV_PHASE_RESTRICT && phase != EMV_PHASE_TRM &&
-                phase != EMV_PHASE_TAA && phase != EMV_PHASE_ONLINE) {
-            last_res = res;
-            ctx->outcome = EMV_OUTCOME_ABORTED;
-            break;
+        if (run_pipeline_phase(ctx, pipeline[i], &last_res)) {
+            goto finish;
         }
-        if (res && res != PM3_ENOTIMPL) {
-            if (phase == EMV_PHASE_CVM && res == PM3_ESOFT) {
-                PrintAndLogEx(WARNING, "CVM phase failed — continuing to GEN AC1 for lab visibility");
-            } else {
-                last_res = res;
-                ctx->outcome = EMV_OUTCOME_ABORTED;
-                break;
-            }
-        }
-        if (stop_after_phase(ctx, phase)) {
-            PrintAndLogEx(INFO, "Stopped after phase: %s", emv_term_phase_name(phase));
-            break;
-        }
-        last_res = PM3_SUCCESS;
     }
 
+    if (should_run_online(ctx)) {
+        if (run_pipeline_phase(ctx, EMV_PHASE_ONLINE, &last_res)) {
+            goto finish;
+        }
+    } else if (ctx->ac1_performed && (ctx->ac1_cid & 0xC0) == EMVAC_ARQC_BYTE &&
+               ctx->outcome == EMV_OUTCOME_UNKNOWN) {
+        ctx->outcome = EMV_OUTCOME_ONLINE_REQUIRED;
+    }
+
+    run_pipeline_phase(ctx, EMV_PHASE_COMPLETE, &last_res);
+
+finish:
     if (ctx->outcome == EMV_OUTCOME_UNKNOWN) {
-        uint8_t cid = 0;
-        if (tlvdb_get_uint8(ctx->card, 0x9f27, &cid)) {
-            ctx->outcome = emv_transaction_outcome_from_cid(cid);
+        if (ctx->ac2_performed) {
+            ctx->outcome = emv_transaction_outcome_from_cid(ctx->ac2_cid);
+            if ((ctx->ac2_cid & 0xC0) == EMVAC_TC_BYTE && ctx->online_performed) {
+                ctx->outcome = EMV_OUTCOME_APPROVED_ONLINE;
+            }
+        } else if (ctx->ac1_performed) {
+            ctx->outcome = emv_transaction_outcome_from_cid(ctx->ac1_cid);
         } else if (ctx->cvm_success) {
             ctx->outcome = EMV_OUTCOME_APPROVED_OFFLINE;
         }

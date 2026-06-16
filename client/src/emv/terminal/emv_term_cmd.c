@@ -15,7 +15,10 @@
 #include "emv_terminal.h"
 #include "emv_term_profile.h"
 #include "emv_term_session.h"
+#include "emv_term_load.h"
 #include "phase_cvm.h"
+#include "phase_online.h"
+#include "phase_complete.h"
 #include "cliparser.h"
 #include "cmdparser.h"
 #include "proxmark3.h"
@@ -78,10 +81,11 @@ static emv_term_phase_t parse_phase_name(const char *name) {
 static int CmdEMVTerminalRun(const char *Cmd) {
     CLIParserContext *ctx;
     CLIParserInit(&ctx, "emv terminal run",
-                  "Execute EMV terminal phase loop through init, ODA, CVM, and GEN AC1",
+                  "Execute full EMV terminal phase loop (init through completion)",
                   "emv terminal run -satj    -> select, show APDU/TLV, load terminal profile\n"
                   "emv terminal run -j --pin 1234 -o /tmp/session.json --qvsdc\n"
-                  "emv terminal run -j --trace-phases --stop-after cvm\n");
+                  "emv terminal run -j --auto-online --arpc <hex> --arpc-rc 8840\n"
+                  "emv terminal run -j --trace-phases --stop-after taa\n");
 
     void *argtable[] = {
         arg_param_begin,
@@ -99,9 +103,13 @@ static int CmdEMVTerminalRun(const char *Cmd) {
         arg_str0("o",  "output",   "<file>", "Session JSON output path"),
         arg_str0(NULL, "pin",      "<digits>", "Offline PIN (lab only; prefer EMV_TEST_PIN env)"),
         arg_str0(NULL, "profile",  "<file>", "Terminal profile JSON path"),
-        arg_str0(NULL, "stop-after", "<phase>", "Stop after named phase (init|oda|cvm|caa|...)"),
+        arg_str0(NULL, "stop-after", "<phase>", "Stop after named phase (init|oda|restrict|cvm|trm|taa|caa|online|complete)"),
         arg_lit0(NULL, "trace-phases", "Log phase boundaries"),
         arg_lit0(NULL, "cvm-skip-online", "Skip online PIN CVM (set TVR bit only)"),
+        arg_str0(NULL, "arc",      "<hex>", "Authorization Response Code (8A) for online stub"),
+        arg_str0(NULL, "arpc",     "<hex>", "Issuer Authentication Data / ARPC (tag 91)"),
+        arg_str0(NULL, "arpc-rc",  "<hex>", "ARPC response code suffix (e.g. Interac 8840)"),
+        arg_lit0(NULL, "auto-online", "Run online phase automatically when ARQC returned"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);
@@ -115,6 +123,10 @@ static int CmdEMVTerminalRun(const char *Cmd) {
     opts.stop_after = arg_get_str(ctx, 15)->sval[0];
     opts.trace_phases = arg_get_lit(ctx, 16);
     opts.cvm_skip_online = arg_get_lit(ctx, 17);
+    opts.arc = arg_get_str(ctx, 18)->sval[0];
+    opts.arpc = arg_get_str(ctx, 19)->sval[0];
+    opts.arpc_rc = arg_get_str(ctx, 20)->sval[0];
+    opts.auto_online = arg_get_lit(ctx, 21);
     opts.use_terminal_profile = opts.param_load_json;
     CLIParserFree(ctx);
 
@@ -141,7 +153,8 @@ static int CmdEMVTerminalStep(const char *Cmd) {
     CLIParserInit(&ctx, "emv terminal step",
                   "Run a single terminal phase",
                   "emv terminal step init -satj\n"
-                  "emv terminal step cvm --session /tmp/s.json --pin 1234\n");
+                  "emv terminal step cvm --session /tmp/s.json --pin 1234\n"
+                  "emv terminal step online --session /tmp/s.json --arpc <hex>\n");
 
     void *argtable[] = {
         arg_param_begin,
@@ -159,6 +172,9 @@ static int CmdEMVTerminalStep(const char *Cmd) {
         arg_str0(NULL, "session", "<file>", "Session file for state carry-over"),
         arg_str0(NULL, "pin",      "<digits>", "PIN for cvm phase"),
         arg_str0("o",  "output",   "<file>", "Updated session JSON path"),
+        arg_str0(NULL, "arc",      "<hex>", "ARC for online phase"),
+        arg_str0(NULL, "arpc",     "<hex>", "ARPC for online phase"),
+        arg_str0(NULL, "arpc-rc",  "<hex>", "ARPC-RC suffix"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);
@@ -176,6 +192,9 @@ static int CmdEMVTerminalStep(const char *Cmd) {
     opts.session_path = arg_get_str(ctx, 13)->sval[0];
     opts.pin = arg_get_str(ctx, 14)->sval[0];
     opts.output_session = arg_get_str(ctx, 15)->sval[0];
+    opts.arc = arg_get_str(ctx, 16)->sval[0];
+    opts.arpc = arg_get_str(ctx, 17)->sval[0];
+    opts.arpc_rc = arg_get_str(ctx, 18)->sval[0];
     CLIParserFree(ctx);
 
     print_channel(opts.channel);
@@ -206,6 +225,91 @@ static int CmdEMVTerminalStep(const char *Cmd) {
     }
     SetAPDULogging(false);
     emv_term_ctx_free(&term_ctx);
+    return res;
+}
+
+static int CmdEMVTerminalOnline(const char *Cmd) {
+    CLIParserContext *ctx;
+    CLIParserInit(&ctx, "emv terminal online",
+                  "Complete online path after ARQC (EXTERNAL AUTH + AC2)",
+                  "emv terminal online --session s.json --arc 3030 --arpc <hex>\n"
+                  "emv terminal online --session s.json --arpc <hex> --arpc-rc 8840 -w\n");
+
+    void *argtable[] = {
+        arg_param_begin,
+        arg_str1(NULL, "session", "<file>", "Session JSON from prior run with ARQC"),
+        arg_str0(NULL, "arc",      "<hex>", "Authorization Response Code (8A)"),
+        arg_str0(NULL, "arpc",     "<hex>", "Issuer Authentication Data / ARPC"),
+        arg_str0(NULL, "arpc-rc",  "<hex>", "ARPC response code suffix"),
+        arg_lit0("a",  "apdu",     "Show APDU requests and responses"),
+        arg_lit0("w",  "wired",    "Contact interface"),
+        arg_str0("o",  "output",   "<file>", "Updated session JSON path"),
+        arg_param_end
+    };
+    CLIExecWithReturn(ctx, Cmd, argtable, true);
+
+    const char *session = arg_get_str(ctx, 1)->sval[0];
+    const char *arc = arg_get_str(ctx, 2)->sval[0];
+    const char *arpc = arg_get_str(ctx, 3)->sval[0];
+    const char *arpc_rc = arg_get_str(ctx, 4)->sval[0];
+    bool show_apdu = arg_get_lit(ctx, 5);
+    bool wired = arg_get_lit(ctx, 6);
+    const char *output = arg_get_str(ctx, 7)->sval[0];
+    CLIParserFree(ctx);
+
+    if (!session || !session[0]) {
+        PrintAndLogEx(ERR, "Session file required");
+        return PM3_EINVARG;
+    }
+
+    emv_term_cli_opts_t opts = {0};
+    opts.channel = wired ? CC_CONTACT : CC_CONTACTLESS;
+    opts.show_apdu = show_apdu;
+    opts.session_path = session;
+    opts.output_session = output;
+    opts.arc = arc;
+    opts.arpc = arpc;
+    opts.arpc_rc = arpc_rc;
+
+    print_channel(opts.channel);
+
+    if (IfPm3Smartcard() == false && opts.channel == CC_CONTACT) {
+        PrintAndLogEx(WARNING, "PM3 does not have SMARTCARD support. Exiting.");
+        return PM3_EDEVNOTSUPP;
+    }
+
+    emv_term_ctx_t term_ctx;
+    int res = emv_term_ctx_init(&term_ctx, &opts);
+    if (res) {
+        return res;
+    }
+
+    emv_term_session_load_json(&term_ctx, session);
+
+    if (!term_ctx.ac1_performed || (term_ctx.ac1_cid & 0xC0) != EMVAC_ARQC_BYTE) {
+        PrintAndLogEx(ERR, "Session does not contain ARQC from AC1 — run caa phase first");
+        emv_term_ctx_free(&term_ctx);
+        return PM3_EINVARG;
+    }
+
+    SetAPDULogging(show_apdu);
+    res = phase_online_run(&term_ctx);
+    if (res == PM3_SUCCESS) {
+        phase_complete_run(&term_ctx);
+    }
+
+    const char *outpath = output;
+    if (!outpath || !outpath[0]) {
+        outpath = session;
+    }
+    emv_term_outcome_t outcome = term_ctx.outcome;
+    emv_term_session_save_json(&term_ctx, outpath);
+
+    DropFieldEx(opts.channel);
+    SetAPDULogging(false);
+    emv_term_ctx_free(&term_ctx);
+
+    PrintAndLogEx(SUCCESS, "[+] Terminal outcome: %s", emv_term_outcome_str(outcome));
     return res;
 }
 
@@ -294,29 +398,54 @@ static int CmdEMVTerminalProfile(const char *Cmd) {
 static int CmdEMVTerminalLoad(const char *Cmd) {
     CLIParserContext *ctx;
     CLIParserInit(&ctx, "emv terminal load",
-                  "Import card TLV subset from prior emv scan JSON (offline replay stub)",
-                  "emv terminal load scan.json");
+                  "Import card TLV subset from prior emv scan JSON for offline phase testing",
+                  "emv terminal load scan.json -o card_session.json\n"
+                  "emv terminal load scan.json  # prints loaded AID/tags only");
 
     void *argtable[] = {
         arg_param_begin,
         arg_str1(NULL, NULL, "<file>", "Scan JSON file from emv scan"),
+        arg_str0("o", "output", "<file>", "Write session JSON with loaded card state"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);
-    (void)arg_get_str(ctx, 1);
+
+    const char *file = arg_get_str(ctx, 1)->sval[0];
+    const char *output = arg_get_str(ctx, 2)->sval[0];
     CLIParserFree(ctx);
 
-    PrintAndLogEx(WARNING, "emv terminal load not yet implemented — use live card with emv terminal run");
-    return PM3_ENOTIMPL;
+    emv_term_cli_opts_t opts = {0};
+    emv_term_ctx_t term_ctx;
+    int res = emv_term_ctx_init(&term_ctx, &opts);
+    if (res) {
+        return res;
+    }
+
+    res = emv_term_load_from_scan(&term_ctx, file);
+    if (res) {
+        emv_term_ctx_free(&term_ctx);
+        return res;
+    }
+
+    emv_term_event_add(&term_ctx, EMV_PHASE_INIT, PM3_SUCCESS, 0, "loaded from scan");
+
+    if (output && output[0]) {
+        emv_term_session_save_json(&term_ctx, output);
+        str_copy(term_ctx.session_file, sizeof(term_ctx.session_file), output);
+    }
+
+    emv_term_ctx_free(&term_ctx);
+    return PM3_SUCCESS;
 }
 
 static command_t TerminalCommandTable[] = {
     {"help",    CmdHelp,              AlwaysAvailable, "This help"},
-    {"run",     CmdEMVTerminalRun,    IfPm3Iso14443,   "Run terminal phase loop (init→ODA→CVM→AC1)"},
+    {"run",     CmdEMVTerminalRun,    IfPm3Iso14443,   "Run full terminal phase loop"},
     {"step",    CmdEMVTerminalStep,   IfPm3Iso14443,   "Run single terminal phase"},
+    {"online",  CmdEMVTerminalOnline, IfPm3Iso14443,   "Complete online path after ARQC"},
     {"pin",     CmdEMVTerminalPin,    IfPm3Iso14443,   "Standalone VERIFY PIN"},
     {"profile", CmdEMVTerminalProfile, AlwaysAvailable, "Print or validate terminal profile JSON"},
-    {"load",    CmdEMVTerminalLoad,   AlwaysAvailable, "Load card data from scan JSON (stub)"},
+    {"load",    CmdEMVTerminalLoad,   AlwaysAvailable, "Load card data from scan JSON"},
     {NULL, NULL, NULL, NULL}
 };
 

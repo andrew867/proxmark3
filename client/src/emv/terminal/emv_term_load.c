@@ -1,0 +1,165 @@
+//-----------------------------------------------------------------------------
+// Copyright (C) Proxmark3 contributors. See AUTHORS.md for details.
+//
+// See LICENSE.txt for the text of the license.
+//-----------------------------------------------------------------------------
+
+#include "emv_term_load.h"
+#include "../emvjson.h"
+#include "ui.h"
+#include "util.h"
+#include "commonutil.h"
+#include <jansson.h>
+#include <string.h>
+
+static bool parse_json_hex_field(json_t *obj, const char *key, uint8_t *out, size_t *out_len, size_t max_len) {
+    json_t *jelm = json_object_get(obj, key);
+    if (!jelm || !json_is_string(jelm)) {
+        return false;
+    }
+    int buflen = 0;
+    if (param_gethex_to_eol(json_string_value(jelm), 0, out, max_len, &buflen)) {
+        return false;
+    }
+    if (out_len) {
+        *out_len = (size_t)buflen;
+    }
+    return true;
+}
+
+static tlv_tag_t parse_json_tag(json_t *obj) {
+    uint8_t buf[4] = {0};
+    size_t len = 0;
+    if (!parse_json_hex_field(obj, "tag", buf, &len, sizeof(buf)) || len == 0) {
+        return 0;
+    }
+    tlv_tag_t tag = buf[0];
+    if (len >= 2) {
+        tag = (tag << 8) | buf[1];
+    }
+    if (len >= 3) {
+        tag = (tag << 8) | buf[2];
+    }
+    return tag;
+}
+
+static struct tlvdb *json_tlv_to_tlvdb(json_t *node) {
+    if (!node || !json_is_object(node)) {
+        return NULL;
+    }
+
+    tlv_tag_t tag = parse_json_tag(node);
+    if (!tag) {
+        return NULL;
+    }
+
+    uint8_t value[4096] = {0};
+    size_t value_len = 0;
+    parse_json_hex_field(node, "value", value, &value_len, sizeof(value));
+
+    struct tlvdb *elm = tlvdb_fixed(tag, value_len, value);
+
+    json_t *childs = json_object_get(node, "Childs");
+    if (json_is_array(childs)) {
+        size_t n = json_array_size(childs);
+        for (size_t i = 0; i < n; i++) {
+            struct tlvdb *child = json_tlv_to_tlvdb(json_array_get(childs, i));
+            if (child) {
+                if (!elm->children) {
+                    elm->children = child;
+                    child->parent = elm;
+                } else {
+                    tlvdb_add(elm->children, child);
+                    child->parent = elm;
+                }
+            }
+        }
+    }
+
+    return elm;
+}
+
+static void merge_tlv_tree(struct tlvdb *root, json_t *node) {
+    struct tlvdb *parsed = json_tlv_to_tlvdb(node);
+    if (parsed) {
+        tlvdb_add(root, parsed);
+    }
+}
+
+static void merge_tlv_json_path(struct tlvdb *root, json_t *doc, const char *path) {
+    json_t *node = json_path_get(doc, path);
+    if (!node) {
+        return;
+    }
+    if (json_is_array(node)) {
+        size_t n = json_array_size(node);
+        for (size_t i = 0; i < n; i++) {
+            merge_tlv_tree(root, json_array_get(node, i));
+        }
+    } else if (json_is_object(node)) {
+        merge_tlv_tree(root, node);
+    }
+}
+
+static void load_application_data(struct tlvdb *root, json_t *doc) {
+    JsonLoadApplicationData(doc, root);
+}
+
+static void load_records(struct tlvdb *root, json_t *doc) {
+    json_t *records = json_path_get(doc, "$.Application.Records");
+    if (!json_is_array(records)) {
+        return;
+    }
+
+    size_t n = json_array_size(records);
+    for (size_t i = 0; i < n; i++) {
+        json_t *rec = json_array_get(records, i);
+        if (!json_is_object(rec)) {
+            continue;
+        }
+        merge_tlv_json_path(root, rec, "$.Data");
+    }
+}
+
+int emv_term_load_from_scan(emv_term_ctx_t *ctx, const char *path) {
+    if (!ctx || !path || !path[0]) {
+        return PM3_EINVARG;
+    }
+
+    json_error_t error;
+    json_t *root = json_load_file(path, 0, &error);
+    if (!root) {
+        PrintAndLogEx(ERR, "Scan load error line %d: %s", error.line, error.text);
+        return PM3_ESOFT;
+    }
+
+    uint8_t aid[APDU_AID_LEN] = {0};
+    size_t aid_len = 0;
+    if (JsonLoadBufAsHex(root, "$.Application.AID", aid, sizeof(aid), &aid_len) != 0 || aid_len == 0) {
+        PrintAndLogEx(ERR, "Scan JSON missing $.Application.AID");
+        json_decref(root);
+        return PM3_EINVARG;
+    }
+
+    memcpy(ctx->aid, aid, aid_len);
+    ctx->aid_len = aid_len;
+
+    merge_tlv_json_path(ctx->card, root, "$.Application.FCITemplate");
+    merge_tlv_json_path(ctx->card, root, "$.Application.GPO");
+    load_application_data(ctx->card, root);
+    load_records(ctx->card, root);
+
+    json_decref(root);
+
+    if (!tlvdb_get(ctx->card, 0x82, NULL)) {
+        PrintAndLogEx(ERR, "Loaded card data missing AIP (82) — run emv scan with full TLV");
+        return PM3_EINVARG;
+    }
+
+    if (!tlvdb_get(ctx->card, 0x8c, NULL) && !tlvdb_get(ctx->card, 0x9f26, NULL)) {
+        PrintAndLogEx(WARNING, "No CDOL1 (8C) or AC (9F26) — offline GEN AC testing may be limited");
+    }
+
+    PrintAndLogEx(SUCCESS, "Loaded card TLV from scan: AID=%s", sprint_hex_inrow(ctx->aid, ctx->aid_len));
+    return PM3_SUCCESS;
+}

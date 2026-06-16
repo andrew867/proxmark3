@@ -38,8 +38,13 @@ typedef enum {
     EMV_OUTCOME_APPROVED_OFFLINE,
     EMV_OUTCOME_DECLINED,
     EMV_OUTCOME_ONLINE_REQUIRED,
+    EMV_OUTCOME_APPROVED_ONLINE,
     EMV_OUTCOME_ABORTED,
 } emv_term_outcome_t;
+
+#define EMVAC_AAC_BYTE   0x00
+#define EMVAC_TC_BYTE    0x40
+#define EMVAC_ARQC_BYTE  0x80
 
 typedef struct {
     emv_term_phase_t id;
@@ -66,6 +71,10 @@ typedef struct {
     const char *stop_after;
     const char *profile_path;
     const char *session_path;
+    const char *arc;
+    const char *arpc;
+    const char *arpc_rc;
+    bool auto_online;
 } emv_term_cli_opts_t;
 
 typedef struct emv_term_ctx {
@@ -91,6 +100,22 @@ typedef struct emv_term_ctx {
     struct tlv *pdol_data_tlv;
     emv_term_cli_opts_t opts;
     char session_file[FILE_PATH_SIZE];
+    uint8_t requested_ac;
+    uint8_t ac1_cid;
+    uint8_t ac2_cid;
+    bool ac1_performed;
+    bool ac2_performed;
+    bool online_performed;
+    bool online_success;
+    bool restrict_failed;
+    bool floor_limit_exceeded;
+    uint8_t arc[2];
+    uint8_t issuer_auth[32];
+    size_t issuer_auth_len;
+    uint8_t script71[256];
+    size_t script71_len;
+    uint8_t script72[256];
+    size_t script72_len;
 } emv_term_ctx_t;
 
 const char *emv_term_phase_name(emv_term_phase_t phase);

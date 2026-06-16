@@ -36,6 +36,7 @@
 #include "sda_test.h"
 #include "dda_test.h"
 #include "cda_test.h"
+#include "terminal_taa_test.h"
 #include "crypto/libpcrypto.h"
 #include "emv/emv_roca.h"
 
@@ -100,6 +101,9 @@ int ExecuteCryptoTests(bool verbose, bool ignore_time, bool include_slow_tests) 
     if (res) TestFail = true;
 
     res = exec_cda_test(verbose);
+    if (res) TestFail = true;
+
+    res = exec_terminal_taa_test(verbose);
     if (res) TestFail = true;
 
     res = exec_crypto_test(verbose, include_slow_tests);

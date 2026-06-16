@@ -30,15 +30,15 @@ Notes on EMV works on Proxmark3
 - Get records from AFL (`emv readrec`)
 - Make SDA (check records from GPO)
 - Make DDA (`emv challenge` `emv intauth`)
-- Check PIN (`not implemented`)
+- Check PIN (`not implemented` in `emv exec`; see `emv terminal pin`)
 - Fill CDOL1 and CDOL2 (look at next part)
-- Execute AC1 (with CDA support) (`emv genac`)
-- Check ARQC (bank part) (`not implemented`)
-- Make ARPC (bank part) (`not implemented`)
-- Execute external authenticate (`not implemented`)
-- Execute AC2 (with CDA support) (`not implemented`)
+- Execute AC1 (with CDA support) (`emv genac`, `emv terminal run`)
+- Check ARQC (bank part) (`emv terminal online` lab stub)
+- Make ARPC (bank part) (`emv terminal online --arpc` lab stub)
+- Execute external authenticate (`emv terminal online` lab stub)
+- Execute AC2 (with CDA support) (`emv terminal online`)
 - Check ARQC cryptogram (`not implemented`)
-- Issuer scripts processing (`not implemented`)
+- Issuer scripts processing (`emv terminal online` — tag 71 before AC2)
 
 ### Working parts of qVSDC
 ^[Top](#top)
@@ -123,6 +123,29 @@ All main commands are parts of EMV specification. Commands than not described th
 
 `emv test` - test all crypto code from emv part of proxmark.
 
+### EMV terminal emulator (`emv terminal`)
+^[Top](#top)
+
+Client-side terminal phase engine in `client/src/emv/terminal/`. Full planning docs: [docs/emv-terminal-emulator/README.md](../docs/emv-terminal-emulator/README.md).
+
+```
+terminal run       Full phase loop: init → ODA → restrict → CVM → TRM → TAA → CAA → (online) → complete
+terminal step      Run one phase (init|oda|restrict|cvm|trm|taa|caa|online|complete)
+terminal online    Complete online path after ARQC (EXTERNAL AUTH + AC2)
+terminal pin       Standalone VERIFY PIN (offline plain or enciphered)
+terminal profile   Print or validate terminal profile JSON
+terminal load      Import card TLV from prior `emv scan` JSON (offline testing)
+```
+
+Example:
+
+```
+emv terminal run -satj -o /tmp/session.json --qvsdc --pin 1234
+emv terminal run -j --auto-online --arpc <hex> --arpc-rc 8840
+emv terminal online --session /tmp/session.json --arpc <hex>
+emv terminal load card.json -o card_session.json
+emv terminal profile validate docs/emv-terminal-emulator/examples/emv_terminal_profile.json
+```
 ### Useful links
 ^[Top](#top)
 

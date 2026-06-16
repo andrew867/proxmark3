@@ -156,6 +156,8 @@ int emv_term_session_load_json(emv_term_ctx_t *ctx, const char *path) {
             ctx->outcome = EMV_OUTCOME_DECLINED;
         } else if (strcmp(outcome, "online_required") == 0) {
             ctx->outcome = EMV_OUTCOME_ONLINE_REQUIRED;
+        } else if (strcmp(outcome, "approved_online") == 0) {
+            ctx->outcome = EMV_OUTCOME_APPROVED_ONLINE;
         } else if (strcmp(outcome, "aborted") == 0) {
             ctx->outcome = EMV_OUTCOME_ABORTED;
         }
