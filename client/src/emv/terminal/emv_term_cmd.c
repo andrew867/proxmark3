@@ -23,6 +23,8 @@
 #include "emv_term_pin_prompt.h"
 #include "emv_term_secure.h"
 #include "emv_term_redact.h"
+#include "emv_term_sim_export.h"
+#include "emv_term_host_tcp.h"
 #include "phase_cvm.h"
 #include "phase_online.h"
 #include "phase_complete.h"
@@ -163,6 +165,8 @@ static int CmdEMVTerminalRun(const char *Cmd) {
         arg_str0(NULL, "capk-extra", "<file>", "Extra CAPK file merged at ODA init"),
         arg_lit0(NULL, "no-redact", "Session export without crypto redaction (lab only)"),
         arg_lit0(NULL, "full-tlv", "Embed Card.TLV snapshot in session JSON"),
+        arg_str0(NULL, "export-sim", "<file>", "Export emv sim patch JSON after completion"),
+        arg_str0(NULL, "host-tcp", "<host:port>", "TCP mock acquirer (e.g. 127.0.0.1:8583)"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);
@@ -190,6 +194,8 @@ static int CmdEMVTerminalRun(const char *Cmd) {
                       arg_get_str(ctx, 28)->sval[0],
                       arg_get_lit(ctx, 29),
                       arg_get_lit(ctx, 30));
+    opts.export_sim = arg_get_str(ctx, 31)->sval[0];
+    opts.host_tcp = arg_get_str(ctx, 32)->sval[0];
     opts.use_terminal_profile = opts.param_load_json;
     CLIParserFree(ctx);
 
@@ -218,6 +224,9 @@ static int CmdEMVTerminalRun(const char *Cmd) {
     }
 
     if (opts.host_sim) {
+        term_ctx.opts.auto_online = true;
+    }
+    if (opts.host_tcp && opts.host_tcp[0]) {
         term_ctx.opts.auto_online = true;
     }
 
@@ -743,6 +752,64 @@ static int CmdEMVTerminalSessionExport(const char *Cmd) {
     return PM3_SUCCESS;
 }
 
+static int CmdEMVTerminalHostListen(const char *Cmd) {
+    CLIParserContext *ctx;
+    CLIParserInit(&ctx, "emv terminal host listen",
+                  "TCP mock acquirer on 127.0.0.1 (JSON line protocol)",
+                  "emv terminal host listen 8583\n"
+                  "emv terminal host listen 8583 --host-keys keys.json\n");
+
+    void *argtable[] = {
+        arg_param_begin,
+        arg_u64_0(NULL, "port", "<n>", "Listen port (default 8583)"),
+        arg_str0(NULL, "host-keys", "<file>", "Host keys JSON"),
+        arg_param_end
+    };
+    CLIExecWithReturn(ctx, Cmd, argtable, true);
+
+    uint64_t port = arg_get_u64_def(ctx, 1, 8583);
+    const char *keys = arg_get_str(ctx, 2)->sval[0];
+    CLIParserFree(ctx);
+
+    return emv_term_host_tcp_listen((uint16_t)port, keys);
+}
+
+static command_t HostCommandTable[] = {
+    {"listen",  CmdEMVTerminalHostListen, AlwaysAvailable, "TCP mock acquirer daemon"},
+    {"sim",     CmdEMVTerminalHostSim,    IfPm3Iso14443,   "One-shot host-sim on session"},
+    {NULL, NULL, NULL, NULL}
+};
+
+static int CmdEMVTerminalHost(const char *Cmd) {
+    clearCommandBuffer();
+    return CmdsParse(HostCommandTable, Cmd);
+}
+
+static int CmdEMVTerminalExportSim(const char *Cmd) {
+    CLIParserContext *ctx;
+    CLIParserInit(&ctx, "emv terminal export-sim",
+                  "Export card patch JSON for emv sim research replay",
+                  "emv terminal export-sim session.json -o patch.json\n");
+
+    void *argtable[] = {
+        arg_param_begin,
+        arg_str1(NULL, NULL, "<session>", "Terminal session JSON"),
+        arg_str0("o", "output", "<file>", "Output patch JSON path"),
+        arg_param_end
+    };
+    CLIExecWithReturn(ctx, Cmd, argtable, true);
+
+    const char *session = arg_get_str(ctx, 1)->sval[0];
+    const char *output = arg_get_str(ctx, 2)->sval[0];
+    CLIParserFree(ctx);
+
+    if (!output || !output[0]) {
+        PrintAndLogEx(ERR, "Output path required (-o)");
+        return PM3_EINVARG;
+    }
+    return emv_term_sim_export_session(session, output);
+}
+
 static command_t SessionCommandTable[] = {
     {"print",  CmdEMVTerminalSessionPrint,  AlwaysAvailable, "Print session summary"},
     {"merge",  CmdEMVTerminalSessionMerge,  AlwaysAvailable, "Merge scan + session JSON"},
@@ -763,7 +830,9 @@ static command_t TerminalCommandTable[] = {
     {"pin",     CmdEMVTerminalPin,    IfPm3Iso14443,   "Standalone VERIFY PIN"},
     {"profile", CmdEMVTerminalProfile, AlwaysAvailable, "Print or validate terminal profile JSON"},
     {"load",    CmdEMVTerminalLoad,   AlwaysAvailable, "Load card data from scan JSON"},
-    {"host-sim", CmdEMVTerminalHostSim, IfPm3Iso14443, "Host simulator online completion"},
+    {"export-sim", CmdEMVTerminalExportSim, AlwaysAvailable, "Export emv sim card patch from session"},
+    {"host",    CmdEMVTerminalHost,   AlwaysAvailable, "Host simulator (TCP listen / one-shot)"},
+    {"host-sim", CmdEMVTerminalHostSim, IfPm3Iso14443, "Host simulator online completion (alias)"},
     {"test",    CmdEMVTerminalTest,   AlwaysAvailable, "Golden regression fixtures (no USB)"},
     {"session", CmdEMVTerminalSession, AlwaysAvailable, "Session print / merge / export"},
     {NULL, NULL, NULL, NULL}

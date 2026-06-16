@@ -163,8 +163,10 @@ int phase_caa_run(emv_term_ctx_t *ctx) {
     }
 
     if (AIP & 0x8000 && ctx->tr_type == TT_MSD) {
-        PrintAndLogEx(INFO, "\n--> MSD transaction.");
+        PrintAndLogEx(INFO, "\n--> MSD transaction (mag-stripe mode — no GEN AC).");
+        ctx->ac1_performed = false;
         ctx->outcome = EMV_OUTCOME_APPROVED_OFFLINE;
+        emv_term_tsi_set_bit(ctx, 0, 0x08, true);
         return PM3_SUCCESS;
     }
 

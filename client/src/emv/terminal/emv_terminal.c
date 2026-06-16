@@ -23,6 +23,7 @@
 #include "emv_term_session.h"
 #include "emv_term_scheme.h"
 #include "emv_term_mock.h"
+#include "emv_term_sim_export.h"
 #include "comms.h"
 #include "ui.h"
 #include <string.h>
@@ -45,6 +46,9 @@ static bool should_run_online(const emv_term_ctx_t *ctx) {
         return true;
     }
     if (ctx->opts.host_keys && ctx->opts.host_keys[0]) {
+        return true;
+    }
+    if (ctx->opts.host_tcp && ctx->opts.host_tcp[0]) {
         return true;
     }
     if (ctx->opts.arc && ctx->opts.arc[0]) {
@@ -193,6 +197,10 @@ finish:
     }
     if (outpath && outpath[0]) {
         emv_term_session_save_json(ctx, outpath);
+    }
+
+    if (ctx->opts.export_sim && ctx->opts.export_sim[0]) {
+        emv_term_sim_export_ctx(ctx, ctx->opts.export_sim);
     }
 
     DropFieldEx(ctx->channel);

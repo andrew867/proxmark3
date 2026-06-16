@@ -17,6 +17,9 @@
 #include "../emvjson.h"
 #include "../dol.h"
 #include "../emv_tags.h"
+#include "cmdsmartcard.h"
+#include "cmdparser.h"
+#include "proxmark3.h"
 #include "ui.h"
 #include "proxmark3.h"
 #include <string.h>
@@ -117,6 +120,24 @@ int emv_transaction_init(emv_term_ctx_t *ctx) {
     uint8_t psenum = (ctx->channel == CC_CONTACT) ? 1 : 2;
 
     SetAPDULogging(ctx->opts.show_apdu);
+
+    if (ctx->channel == CC_CONTACT) {
+        if (IfPm3Smartcard() == false) {
+            PrintAndLogEx(WARNING, "PM3 does not have SMARTCARD support — use contactless or add smartcard module");
+            return PM3_EDEVNOTSUPP;
+        }
+        smart_card_atr_t atr_card;
+        if (smart_select(ctx->opts.show_apdu, &atr_card)) {
+            if (atr_card.atr_len) {
+                ctx->atr_len = atr_card.atr_len;
+                str_copy(ctx->atr_hex, sizeof(ctx->atr_hex),
+                         sprint_hex_inrow(atr_card.atr, atr_card.atr_len));
+                if (ctx->opts.show_apdu) {
+                    PrintAndLogEx(INFO, "Contact ATR: %s", ctx->atr_hex);
+                }
+            }
+        }
+    }
 
     if (!ctx->opts.force_search) {
         PrintAndLogEx(NORMAL, "");

@@ -83,6 +83,9 @@ int emv_term_session_save_json(const emv_term_ctx_t *ctx, const char *path) {
     if (ctx->scheme_name[0]) {
         JsonSaveStr(terminal, "Scheme", ctx->scheme_name);
     }
+    if (ctx->atr_len) {
+        JsonSaveStr(terminal, "ATR", ctx->atr_hex);
+    }
     json_object_set_new(root, "Terminal", terminal);
 
     JsonSaveStr(root, "Outcome", emv_term_outcome_str(ctx->outcome));

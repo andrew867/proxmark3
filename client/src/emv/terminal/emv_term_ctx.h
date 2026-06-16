@@ -85,6 +85,8 @@ typedef struct {
     const char *capk_extra;
     bool no_redact;
     bool full_tlv;
+    const char *export_sim;
+    const char *host_tcp;
 } emv_term_cli_opts_t;
 
 typedef struct emv_term_ctx {
@@ -137,6 +139,11 @@ typedef struct emv_term_ctx {
     uint8_t online_pin_block[16];
     size_t online_pin_block_len;
     struct emv_term_exception_file *exception_file;
+    char atr_hex[128];
+    size_t atr_len;
+    char host_tcp_arpc[128];
+    char host_tcp_arpc_rc[16];
+    bool host_tcp_applied;
 } emv_term_ctx_t;
 
 const char *emv_term_phase_name(emv_term_phase_t phase);
