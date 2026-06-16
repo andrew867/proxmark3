@@ -306,21 +306,16 @@ int JsonLoadBufAsHex(json_t *elm, const char *path, uint8_t *data, size_t maxbuf
     return 0;
 }
 
-bool ParamLoadFromJson(struct tlvdb *tlv) {
+bool ParamLoadFromJsonFile(struct tlvdb *tlv, const char *filename) {
     json_t *root;
     json_error_t error;
 
-    if (!tlv) {
-        PrintAndLogEx(ERR, "ERROR load params: tlv tree is NULL.");
+    if (!tlv || !filename || !filename[0]) {
+        PrintAndLogEx(ERR, "ERROR load params: invalid arguments.");
         return false;
     }
 
-    char *path;
-    if (searchFile(&path, RESOURCES_SUBDIR, "emv_defparams", ".json", false) != PM3_SUCCESS) {
-        return false;
-    }
-    root = json_load_file(path, 0, &error);
-    free(path);
+    root = json_load_file(filename, 0, &error);
     if (!root) {
         PrintAndLogEx(ERR, "Load params: json error on line " _YELLOW_("%d") ": %s", error.line, error.text);
         return false;
@@ -328,10 +323,11 @@ bool ParamLoadFromJson(struct tlvdb *tlv) {
 
     if (!json_is_array(root)) {
         PrintAndLogEx(ERR, "Load params: Invalid json format. root must be array.");
+        json_decref(root);
         return false;
     }
 
-    PrintAndLogEx(SUCCESS, "Load params: json(%zu) ( %s )", json_array_size(root), _GREEN_("ok"));
+    PrintAndLogEx(SUCCESS, "Load params: json(%zu) from %s ( %s )", json_array_size(root), filename, _GREEN_("ok"));
 
     for (int i = 0; i < json_array_size(root); i++) {
         json_t *data, *jtag, *jlength, *jvalue;
@@ -373,7 +369,6 @@ bool ParamLoadFromJson(struct tlvdb *tlv) {
             return false;
         }
 
-        PrintAndLogEx(SUCCESS, "TLV param: %s[%d]=%s", tlvTag, tlvLength, tlvValue);
         uint8_t buf[251] = {0};
         size_t buflen = 0;
 
@@ -391,7 +386,7 @@ bool ParamLoadFromJson(struct tlvdb *tlv) {
             return false;
         }
 
-        if (buflen != tlvLength) {
+        if (buflen != (size_t)tlvLength) {
             PrintAndLogEx(ERR, "Load params: data [%d] length of HEX must(%zu) be identical to length in TLV param(%d)", i + 1, buflen, tlvLength);
             json_decref(root);
             return false;
@@ -401,7 +396,21 @@ bool ParamLoadFromJson(struct tlvdb *tlv) {
     }
 
     json_decref(root);
-
     return true;
+}
+
+bool ParamLoadFromJson(struct tlvdb *tlv) {
+    if (!tlv) {
+        PrintAndLogEx(ERR, "ERROR load params: tlv tree is NULL.");
+        return false;
+    }
+
+    char *path;
+    if (searchFile(&path, RESOURCES_SUBDIR, "emv_defparams", ".json", false) != PM3_SUCCESS) {
+        return false;
+    }
+    bool ok = ParamLoadFromJsonFile(tlv, path);
+    free(path);
+    return ok;
 }
 

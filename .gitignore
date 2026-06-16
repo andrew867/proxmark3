@@ -68,6 +68,7 @@ cov-int/
 !client/resources/felica/*.json
 !client/resources/calypso/
 !client/resources/calypso/*.json
+!client/resources/emv_terminal_profile.json
 client/src/ui/ui_image.h
 client/src/ui/ui_overlays.h
 client/deps/reveng/bmptst
