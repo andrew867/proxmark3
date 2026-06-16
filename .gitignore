@@ -123,6 +123,7 @@ fpga_version_info.c
 
 # docs
 !doc/*.json
+!docs/emv-terminal-emulator/examples/*.json
 
 # codeql
 codeql/
