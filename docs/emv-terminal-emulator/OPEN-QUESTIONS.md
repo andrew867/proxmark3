@@ -12,6 +12,9 @@
 | OQ-008 | Support American Express/JCB in v1 or Visa+MC only? | Scope | Medium | Milestone 6 | Open — Visa+MC v1 |
 | OQ-009 | Interactive PIN on Windows client — secure no-echo available? | UX | Medium | Milestone 3 | Open — test per platform |
 | OQ-010 | Add `--mock-apdu-file` for CI or separate test binary only? | Testing | Low | Milestone 2 | Open |
+| OQ-011 | Auto-detect scheme profile from card AID vs `--profile` flag? | UX | Medium | Milestone 3 | Open — explicit `--profile interac|visa|mc` first |
+| OQ-012 | Merge lumag supplemental keys into capk.txt vs `--capk-extra`? | Data | Low | Milestone 3 | Open — Interac keys merged in capk.txt |
+| OQ-013 | Full Visa CVN10 ARPC compute vs manual `--arpc` only? | Crypto | High | Milestone 5 | Open — manual first, host-sim second |
 
 ## Decision Log (fill as resolved)
 

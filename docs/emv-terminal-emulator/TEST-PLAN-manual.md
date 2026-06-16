@@ -81,3 +81,17 @@
 |----|------|-------|-----------------|--------|
 | MAN-ERR-001 | Card removed | Remove card during readrec | Abort; partial JSON if `-o` | Not Run |
 | MAN-ERR-002 | Bad PDOL | Wrong amount format in profile | Clear 6985 message | Not Run |
+
+## Scheme-specific tests (Interac / Visa / MC)
+
+| ID | Area | Steps | Expected Result | Status |
+|----|------|-------|-----------------|--------|
+| MAN-SCH-001 | Interac select | `emv select -s A0000002771010` on Interac test card | SW 9000, FCI with Interac label | Not Run |
+| MAN-SCH-002 | Interac CAPK | `emv exec` or terminal ODA on TC01 with CAPK idx 07 | CA PK verify ok in log | Not Run |
+| MAN-SCH-003 | Interac PIN | Contact TC01 PIN `1111` enciphered CVM | VERIFY SW 9000 | Not Run |
+| MAN-SCH-004 | Interac Flash CL | Contactless tap TC01 | No CVM; transaction completes | Not Run |
+| MAN-SCH-005 | Interac ARPC | Online contact with `--arpc-rc 8840` | No card block after auth | Not Run |
+| MAN-SCH-010 | Visa PPSE | `emv pse` on Visa card | Selects A0000000031010 | Not Run |
+| MAN-SCH-011 | Plus AID | `emv search` finds `A0000000038010` if on card | Listed in search | Not Run |
+| MAN-SCH-012 | Cirrus AID | `emv search` finds `A0000000046000` on ATM test card | Listed | Not Run |
+| MAN-SCH-020 | MC M/Chip | `emv exec -sat --qvsdc` on MC test card | GEN AC ARQC/TC | Not Run |

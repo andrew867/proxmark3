@@ -68,7 +68,8 @@ static const AIDList_t AIDlist [] = {
     { CV_VISA, "A0000000039010" },               // VISA Loyalty
     { CV_VISA, "A000000003999910" },             // VISA Proprietary ATM
     // Visa USA
-    { CV_VISA, "A000000098" },                   // Debit Card
+    { CV_VISA, "A000000098" },                   // Debit Card (partial)
+    { CV_VISA, "A0000000980840" },               // Visa U.S. Common Debit
     { CV_VISA, "A0000000980848" },               // Debit Card
     // Mastercard International
     { CV_MASTERCARD, "A00000000401" },           // MasterCard PayPass
@@ -84,6 +85,7 @@ static const AIDList_t AIDlist [] = {
     { CV_MASTERCARD, "A0000000046000" },         // Cirrus
     { CV_MASTERCARD, "A0000000048002" },         // SecureCode Auth EMV-CAP
     { CV_MASTERCARD, "A0000000049999" },         // MasterCard PayPass
+    { CV_MASTERCARD, "A0000000042203" },         // Mastercard U.S. Common Debit
     { CV_MASTERCARD, "B012345678" },             // Maestro TEST Used for development
     // American Express
     { CV_AMERICANEXPRESS, "A000000025" },
@@ -119,7 +121,7 @@ static const AIDList_t AIDlist [] = {
     { CV_OTHER, "A0000001850002" },              // Post Office Limited - United Kingdom - UK Post Office Account card
     { CV_OTHER, "A0000002281010" },              // Saudi Arabian Monetary Agency (SAMA) - Kingdom of Saudi Arabia - SPAN (M/Chip) - SPAN2 (Saudi Payments Network) - Saudi Arabia domestic credit/debit card (Saudi Arabia Monetary Agency)
     { CV_OTHER, "A0000002282010" },              // Saudi Arabian Monetary Agency (SAMA) - Kingdom of Saudi Arabia - SPAN (VIS) - SPAN2 (Saudi Payments Network) - Saudi Arabia domestic credit/debit card (Saudi Arabia Monetary Agency)
-    { CV_OTHER, "A0000002771010" },              // Interac Association - Canada - INTERAC - Canadian domestic credit/debit card
+    { CV_INTERAC, "A0000002771010" },            // Interac Association - Canada - INTERAC - Canadian domestic debit (Flash)
     { CV_OTHER, "A00000031510100528" },          // Currence Holding/PIN BV - The Netherlands- Currence PuC
     { CV_OTHER, "A0000003156020" },              // Currence Holding/PIN BV - The Netherlands - Chipknip
     { CV_OTHER, "A0000003591010028001" },        // Euro Alliance of Payment Schemes s.c.r.l. (EAPS) - Belgium - Girocard EAPS - ZKA (Germany)

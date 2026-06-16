@@ -63,6 +63,9 @@ docs/emv-terminal-emulator/
 ├── SPEC-firmware.md               armsrc changes, flash budget
 ├── SPEC-connectivity.md           USB, field control, smartcard
 ├── SPEC-field-operations.md       Lab setup, test cards
+├── SPEC-schemes-reference.md      Visa/MC/Plus/Cirrus/Interlink/Interac
+├── SPEC-cryptography-keys.md      CAPKs, ODA, PIN, ARPC
+├── SPEC-advanced-terminal-features.md  CVM, TAA, AC2, issuer scripts
 ├── IMPLEMENTATION-PLAN.md         Phased build order
 ├── MILESTONES.md                  Delivery milestones
 ├── TEST-PLAN-manual.md            Human-run tests
@@ -81,10 +84,11 @@ Related existing docs:
 ## Current Build Priorities
 
 1. **M1 — Terminal MVP on client only** — `emv terminal run` wrapping existing `exec` steps plus explicit session object and outcome reporting.
-2. **M2 — PIN / CVM** — VERIFY command, enciphered PIN block formatting, TVR/CVMR updates.
+2. **M2 — PIN / CVM** — VERIFY command, enciphered PIN block formatting, TVR/CVMR updates ([SPEC-advanced-terminal-features.md](./SPEC-advanced-terminal-features.md)).
 3. **M3 — TAA + AC2** — full offline decision path through second Generate AC.
 4. **M4 — PM3Easy firmware validation** — confirm default PM3GENERIC image still fits; add `SKIP_*` profile if needed.
-5. **M5 — Online lab stub** — mock host ARPC for test cards.
+5. **M5 — Online lab stub** — ARPC / external auth; Interac `8840` ARPC-RC ([SPEC-cryptography-keys.md](./SPEC-cryptography-keys.md)).
+6. **Scheme packs** — Interac + Visa + MC profiles ([SPEC-schemes-reference.md](./SPEC-schemes-reference.md)).
 
 ## Known Gaps
 

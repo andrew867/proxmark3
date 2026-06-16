@@ -4,16 +4,17 @@
 
 ### Added
 
-- Initial enterprise planning documentation bundle under `docs/emv-terminal-emulator/`
-- PRODUCT-OVERVIEW, ARCHITECTURE, SPEC-* (core loop, data model, API, user flows, security, errors, device, firmware, connectivity, field ops)
-- IMPLEMENTATION-PLAN with 8 phases mapped to ntufar/EMV modules
-- MILESTONES 1–7
-- TEST-PLAN-manual.md, TEST-PLAN-automated.md, QA-CHECKLIST.md
-- RISKS-AND-ASSUMPTIONS.md, OPEN-QUESTIONS.md
+- SPEC-schemes-reference.md — Visa, MC, Plus, Cirrus, Interlink, Interac AIDs and kernels
+- SPEC-cryptography-keys.md — CAPKs, ODA recovery, PIN, ARPC/ARPC-RC
+- SPEC-advanced-terminal-features.md — CVM, TAA, AC2, external auth, issuer scripts
+- examples/emv_terminal_profile_interac.json, interac_test_keys.json, terminal_aid_candidates.json
+- Interac test CAPKs (RID A000000277 index 03/07) in client/resources/capk.txt
+- CV_INTERAC vendor enum; US common debit AIDs in emvcore AIDlist
 
 ### Changed
 
-- (pending) Root README document map to link this bundle
+- aidlist.json Interac entry with Flash/C-1 documentation and source URL
+- TEST-PLAN-manual/automated scheme and advanced feature coverage
 
 ### Fixed
 

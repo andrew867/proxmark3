@@ -31,6 +31,11 @@
 | AUTO-INT-001 | Full phase loop with recorded APDU trace | Replay fixture from `emv scan` capture |
 | AUTO-INT-002 | CVM list walk multiple rules | Synthetic TLV 8E fixture |
 | AUTO-INT-003 | `emv terminal run` end-to-end mock | Mock `Iso7816ExchangeEx` |
+| AUTO-ADV-001 | CVM list parser on 8E fixtures | `terminal_cvm_test.c` |
+| AUTO-ADV-002 | TAA: TVR+TAC → AAC/ARQC/TC | `terminal_taa_test.c` |
+| AUTO-CRYPT-001 | CAPK parse including Interac 03/07 | `emv_pk` + capk.txt |
+| AUTO-CRYPT-002 | PIN ISO9564 format 2 builder | `pin_verify_test.c` |
+| AUTO-SCH-001 | GetCardPSVendor Interac AID | `emvcore` unit test |
 
 ## End-to-End Coverage
 
