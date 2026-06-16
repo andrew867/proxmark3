@@ -91,6 +91,16 @@ static int gen_ac(emv_term_ctx_t *ctx, uint8_t ref_control, struct tlv *cdol_tlv
     return PM3_SUCCESS;
 }
 
+static void save_cdol1(emv_term_ctx_t *ctx, struct tlv *cdol) {
+    if (!ctx || !cdol || !cdol->len) {
+        return;
+    }
+    if (cdol->len <= sizeof(ctx->cdol1_data)) {
+        memcpy(ctx->cdol1_data, cdol->value, cdol->len);
+        ctx->cdol1_len = cdol->len;
+    }
+}
+
 int phase_caa_run(emv_term_ctx_t *ctx) {
     if (!ctx) {
         return PM3_EINVARG;
@@ -134,6 +144,7 @@ int phase_caa_run(emv_term_ctx_t *ctx) {
                 return PM3_ESOFT;
             }
             res = gen_ac(ctx, ac_ref_control(ctx, false, true), cdol, true);
+            save_cdol1(ctx, cdol);
             free(cdol);
             if (res) {
                 return res;
@@ -163,6 +174,7 @@ int phase_caa_run(emv_term_ctx_t *ctx) {
 
         bool cda = (ctx->tr_type == TT_CDA);
         res = gen_ac(ctx, ac_ref_control(ctx, false, cda), cdol, true);
+        save_cdol1(ctx, cdol);
         free(cdol);
         if (res) {
             return res;

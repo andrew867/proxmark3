@@ -74,7 +74,13 @@ typedef struct {
     const char *arc;
     const char *arpc;
     const char *arpc_rc;
+    const char *host_keys;
+    const char *mock_apdu;
+    const char *scheme_profile;
     bool auto_online;
+    bool host_sim;
+    bool continue_on_bad_arqc;
+    bool record_apdu;
 } emv_term_cli_opts_t;
 
 typedef struct emv_term_ctx {
@@ -116,6 +122,11 @@ typedef struct emv_term_ctx {
     size_t script71_len;
     uint8_t script72[256];
     size_t script72_len;
+    uint8_t cdol1_data[256];
+    size_t cdol1_len;
+    char host_keys_path[FILE_PATH_SIZE];
+    char scheme_name[32];
+    bool host_arqc_ok;
 } emv_term_ctx_t;
 
 const char *emv_term_phase_name(emv_term_phase_t phase);
@@ -123,6 +134,7 @@ const char *emv_term_outcome_str(emv_term_outcome_t outcome);
 
 int emv_term_ctx_init(emv_term_ctx_t *ctx, const emv_term_cli_opts_t *opts);
 void emv_term_ctx_free(emv_term_ctx_t *ctx);
+int emv_term_cli_setup(emv_term_ctx_t *ctx);
 
 int emv_term_event_add(emv_term_ctx_t *ctx, emv_term_phase_t phase, int result, uint16_t sw, const char *note);
 

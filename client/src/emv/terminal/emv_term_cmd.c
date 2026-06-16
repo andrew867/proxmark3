@@ -16,6 +16,9 @@
 #include "emv_term_profile.h"
 #include "emv_term_session.h"
 #include "emv_term_load.h"
+#include "emv_term_host.h"
+#include "emv_term_golden.h"
+#include "emv_term_mock.h"
 #include "phase_cvm.h"
 #include "phase_online.h"
 #include "phase_complete.h"
@@ -28,6 +31,25 @@
 #include <stdlib.h>
 
 static int CmdHelp(const char *Cmd);
+
+static bool is_scheme_profile_name(const char *s) {
+    if (!s || !s[0]) {
+        return false;
+    }
+    return strcmp(s, "auto") == 0 || strcmp(s, "default") == 0 ||
+           strcmp(s, "interac") == 0 || strcmp(s, "visa") == 0 || strcmp(s, "mc") == 0;
+}
+
+static void apply_profile_arg(emv_term_cli_opts_t *opts, const char *profile_arg) {
+    if (!profile_arg || !profile_arg[0]) {
+        return;
+    }
+    if (is_scheme_profile_name(profile_arg)) {
+        opts->scheme_profile = profile_arg;
+    } else {
+        opts->profile_path = profile_arg;
+    }
+}
 
 static void print_channel(Iso7816CommandChannel channel) {
     switch (channel) {
@@ -84,7 +106,8 @@ static int CmdEMVTerminalRun(const char *Cmd) {
                   "Execute full EMV terminal phase loop (init through completion)",
                   "emv terminal run -satj    -> select, show APDU/TLV, load terminal profile\n"
                   "emv terminal run -j --pin 1234 -o /tmp/session.json --qvsdc\n"
-                  "emv terminal run -j --auto-online --arpc <hex> --arpc-rc 8840\n"
+                  "emv terminal run -j --auto-online --host-sim --profile auto\n"
+                  "emv terminal run --mock-apdu-file fixtures/foo/mock_apdu.json\n"
                   "emv terminal run -j --trace-phases --stop-after taa\n");
 
     void *argtable[] = {
@@ -102,7 +125,7 @@ static int CmdEMVTerminalRun(const char *Cmd) {
         arg_lit0("w",  "wired",    "Contact (ISO7816) interface"),
         arg_str0("o",  "output",   "<file>", "Session JSON output path"),
         arg_str0(NULL, "pin",      "<digits>", "Offline PIN (lab only; prefer EMV_TEST_PIN env)"),
-        arg_str0(NULL, "profile",  "<file>", "Terminal profile JSON path"),
+        arg_str0(NULL, "profile",  "<name|file>", "Scheme profile (auto|interac|visa|mc) or terminal profile JSON"),
         arg_str0(NULL, "stop-after", "<phase>", "Stop after named phase (init|oda|restrict|cvm|trm|taa|caa|online|complete)"),
         arg_lit0(NULL, "trace-phases", "Log phase boundaries"),
         arg_lit0(NULL, "cvm-skip-online", "Skip online PIN CVM (set TVR bit only)"),
@@ -110,6 +133,11 @@ static int CmdEMVTerminalRun(const char *Cmd) {
         arg_str0(NULL, "arpc",     "<hex>", "Issuer Authentication Data / ARPC (tag 91)"),
         arg_str0(NULL, "arpc-rc",  "<hex>", "ARPC response code suffix (e.g. Interac 8840)"),
         arg_lit0(NULL, "auto-online", "Run online phase automatically when ARQC returned"),
+        arg_lit0(NULL, "host-sim", "Use host simulator for online ARQC/ARPC"),
+        arg_str0(NULL, "host-keys", "<file>", "Host simulator keys JSON"),
+        arg_str0(NULL, "mock-apdu-file", "<file>", "Replay CAPDU trace from JSON (no card)"),
+        arg_lit0(NULL, "continue-on-bad-arqc", "Continue online after ARQC verify failure"),
+        arg_lit0(NULL, "record-apdu", "Record APDU trace (stub — use mock fixtures for CI)"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);
@@ -119,7 +147,7 @@ static int CmdEMVTerminalRun(const char *Cmd) {
 
     opts.output_session = arg_get_str(ctx, 12)->sval[0];
     opts.pin = arg_get_str(ctx, 13)->sval[0];
-    opts.profile_path = arg_get_str(ctx, 14)->sval[0];
+    apply_profile_arg(&opts, arg_get_str(ctx, 14)->sval[0]);
     opts.stop_after = arg_get_str(ctx, 15)->sval[0];
     opts.trace_phases = arg_get_lit(ctx, 16);
     opts.cvm_skip_online = arg_get_lit(ctx, 17);
@@ -127,12 +155,21 @@ static int CmdEMVTerminalRun(const char *Cmd) {
     opts.arpc = arg_get_str(ctx, 19)->sval[0];
     opts.arpc_rc = arg_get_str(ctx, 20)->sval[0];
     opts.auto_online = arg_get_lit(ctx, 21);
+    opts.host_sim = arg_get_lit(ctx, 22);
+    opts.host_keys = arg_get_str(ctx, 23)->sval[0];
+    opts.mock_apdu = arg_get_str(ctx, 24)->sval[0];
+    opts.continue_on_bad_arqc = arg_get_lit(ctx, 25);
+    opts.record_apdu = arg_get_lit(ctx, 26);
     opts.use_terminal_profile = opts.param_load_json;
     CLIParserFree(ctx);
 
     print_channel(opts.channel);
 
-    if (IfPm3Smartcard() == false && opts.channel == CC_CONTACT) {
+    if (opts.mock_apdu && opts.mock_apdu[0]) {
+        opts.activate_field = false;
+    }
+
+    if (IfPm3Smartcard() == false && opts.channel == CC_CONTACT && !(opts.mock_apdu && opts.mock_apdu[0])) {
         PrintAndLogEx(WARNING, "PM3 does not have SMARTCARD support. Exiting.");
         return PM3_EDEVNOTSUPP;
     }
@@ -143,7 +180,19 @@ static int CmdEMVTerminalRun(const char *Cmd) {
         return res;
     }
 
+    res = emv_term_cli_setup(&term_ctx);
+    if (res) {
+        emv_term_ctx_free(&term_ctx);
+        emv_term_mock_clear();
+        return res;
+    }
+
+    if (opts.host_sim) {
+        term_ctx.opts.auto_online = true;
+    }
+
     res = emv_terminal_run(&term_ctx);
+    emv_term_mock_clear();
     emv_term_ctx_free(&term_ctx);
     return res;
 }
@@ -438,6 +487,104 @@ static int CmdEMVTerminalLoad(const char *Cmd) {
     return PM3_SUCCESS;
 }
 
+static int CmdEMVTerminalHostSim(const char *Cmd) {
+    CLIParserContext *ctx;
+    CLIParserInit(&ctx, "emv terminal host-sim",
+                  "Complete online path using host simulator keys (ARQC verify + ARPC)",
+                  "emv terminal host-sim --session s.json\n"
+                  "emv terminal host-sim --session s.json --host-keys keys.json -a\n");
+
+    void *argtable[] = {
+        arg_param_begin,
+        arg_str1(NULL, "session", "<file>", "Session JSON with ARQC from AC1"),
+        arg_str0(NULL, "host-keys", "<file>", "Host keys JSON (default: interac test keys)"),
+        arg_str0(NULL, "arc", "<hex>", "Authorization Response Code (8A)"),
+        arg_lit0("a", "apdu", "Show APDU requests and responses"),
+        arg_lit0("w", "wired", "Contact interface"),
+        arg_str0("o", "output", "<file>", "Updated session JSON path"),
+        arg_lit0(NULL, "continue-on-bad-arqc", "Continue after ARQC verify failure"),
+        arg_param_end
+    };
+    CLIExecWithReturn(ctx, Cmd, argtable, true);
+
+    const char *session = arg_get_str(ctx, 1)->sval[0];
+    const char *host_keys = arg_get_str(ctx, 2)->sval[0];
+    const char *arc = arg_get_str(ctx, 3)->sval[0];
+    bool show_apdu = arg_get_lit(ctx, 4);
+    bool wired = arg_get_lit(ctx, 5);
+    const char *output = arg_get_str(ctx, 6)->sval[0];
+    bool cont_bad = arg_get_lit(ctx, 7);
+    CLIParserFree(ctx);
+
+    emv_term_cli_opts_t opts = {0};
+    opts.channel = wired ? CC_CONTACT : CC_CONTACTLESS;
+    opts.show_apdu = show_apdu;
+    opts.session_path = session;
+    opts.output_session = output;
+    opts.arc = arc;
+    opts.host_keys = host_keys;
+    opts.host_sim = true;
+    opts.continue_on_bad_arqc = cont_bad;
+
+    emv_term_ctx_t term_ctx;
+    int res = emv_term_ctx_init(&term_ctx, &opts);
+    if (res) {
+        return res;
+    }
+
+    emv_term_session_load_json(&term_ctx, session);
+    if (host_keys && host_keys[0]) {
+        str_copy(term_ctx.host_keys_path, sizeof(term_ctx.host_keys_path), host_keys);
+    }
+
+    SetAPDULogging(show_apdu);
+    res = emv_term_host_sim_run(&term_ctx, host_keys);
+
+    const char *outpath = output;
+    if (!outpath || !outpath[0]) {
+        outpath = session;
+    }
+    emv_term_outcome_t outcome = term_ctx.outcome;
+    emv_term_session_save_json(&term_ctx, outpath);
+
+    DropFieldEx(opts.channel);
+    SetAPDULogging(false);
+    emv_term_ctx_free(&term_ctx);
+
+    PrintAndLogEx(SUCCESS, "[+] Terminal outcome: %s", emv_term_outcome_str(outcome));
+    return res;
+}
+
+static int CmdEMVTerminalTest(const char *Cmd) {
+    CLIParserContext *ctx;
+    CLIParserInit(&ctx, "emv terminal test",
+                  "Run golden regression fixtures (no USB required)",
+                  "emv terminal test --golden\n"
+                  "emv terminal test --fixture taa_denial_expired\n");
+
+    void *argtable[] = {
+        arg_param_begin,
+        arg_lit0("g", "golden", "Run all golden fixtures"),
+        arg_str0("f", "fixture", "<name>", "Run single fixture by directory name"),
+        arg_param_end
+    };
+    CLIExecWithReturn(ctx, Cmd, argtable, true);
+
+    bool golden = arg_get_lit(ctx, 1);
+    const char *fixture = arg_get_str(ctx, 2)->sval[0];
+    CLIParserFree(ctx);
+
+    if (fixture && fixture[0]) {
+        return emv_term_golden_run(fixture, true);
+    }
+    if (golden || (!fixture || !fixture[0])) {
+        return emv_term_golden_run_all(true);
+    }
+
+    PrintAndLogEx(ERR, "Use --golden or --fixture <name>");
+    return PM3_EINVARG;
+}
+
 static command_t TerminalCommandTable[] = {
     {"help",    CmdHelp,              AlwaysAvailable, "This help"},
     {"run",     CmdEMVTerminalRun,    IfPm3Iso14443,   "Run full terminal phase loop"},
@@ -446,6 +593,8 @@ static command_t TerminalCommandTable[] = {
     {"pin",     CmdEMVTerminalPin,    IfPm3Iso14443,   "Standalone VERIFY PIN"},
     {"profile", CmdEMVTerminalProfile, AlwaysAvailable, "Print or validate terminal profile JSON"},
     {"load",    CmdEMVTerminalLoad,   AlwaysAvailable, "Load card data from scan JSON"},
+    {"host-sim", CmdEMVTerminalHostSim, IfPm3Iso14443, "Host simulator online completion"},
+    {"test",    CmdEMVTerminalTest,   AlwaysAvailable, "Golden regression fixtures (no USB)"},
     {NULL, NULL, NULL, NULL}
 };
 

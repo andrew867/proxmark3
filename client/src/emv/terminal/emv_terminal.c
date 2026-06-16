@@ -21,6 +21,8 @@
 #include "phase_complete.h"
 #include "emv_transaction.h"
 #include "emv_term_session.h"
+#include "emv_term_scheme.h"
+#include "emv_term_mock.h"
 #include "comms.h"
 #include "ui.h"
 #include <string.h>
@@ -37,6 +39,12 @@ static bool should_run_online(const emv_term_ctx_t *ctx) {
         return false;
     }
     if (ctx->opts.auto_online) {
+        return true;
+    }
+    if (ctx->opts.host_sim) {
+        return true;
+    }
+    if (ctx->opts.host_keys && ctx->opts.host_keys[0]) {
         return true;
     }
     if (ctx->opts.arc && ctx->opts.arc[0]) {
@@ -145,6 +153,12 @@ int emv_terminal_run(emv_term_ctx_t *ctx) {
     for (size_t i = 0; i < sizeof(pipeline) / sizeof(pipeline[0]); i++) {
         if (run_pipeline_phase(ctx, pipeline[i], &last_res)) {
             goto finish;
+        }
+        if (pipeline[i] == EMV_PHASE_INIT && ctx->opts.scheme_profile && ctx->opts.scheme_profile[0]) {
+            emv_term_scheme_info_t sinfo;
+            if (emv_term_scheme_resolve(ctx->opts.scheme_profile, ctx->aid, ctx->aid_len, &sinfo) == PM3_SUCCESS) {
+                emv_term_scheme_apply(ctx, &sinfo);
+            }
         }
     }
 

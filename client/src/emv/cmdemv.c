@@ -2387,7 +2387,7 @@ static command_t CommandTable[] =  {
     {"search",      CmdEMVSearch,                   IfPm3Iso14443,   "Try to select all applets from applets list and print installed applets"},
     {"select",      CmdEMVSelect,                   IfPm3Iso14443,   "Select applet"},
     {"-----------", CmdHelp,                        IfPm3Iso14443a,  "-------------------- " _CYAN_("terminal emulator") " --------------------"},
-    {"terminal",    CmdEMVTerminal,                 IfPm3Iso14443,   "EMV terminal emulator (phases, PIN, profile)"},
+    {"terminal",    CmdEMVTerminal,                 AlwaysAvailable, "EMV terminal emulator (phases, PIN, profile, golden tests)"},
     {"-----------", CmdHelp,                        IfPm3Iso14443a,  "---------------------- " _CYAN_("simulation") " ---------------------"},
     {"smart2nfc",   CmdEMVSmartToNFC,               IfPm3Smartcard,  "Complete transaction as a nfc smart card, using the ISO-7816 interface for auth"},
     /*

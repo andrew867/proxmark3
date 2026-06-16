@@ -23,6 +23,7 @@
 #include "cmdparser.h"
 #include "cmdsmartcard.h" // ExchangeAPDUSC
 #include "ui.h"
+#include "emv/terminal/emv_term_mock.h"
 #include "cmdhf14a.h"
 #include "cmdhf14b.h"
 #include "iso14b.h"      // iso14b_raw_cmd_t
@@ -86,6 +87,11 @@ int Iso7816ExchangeEx(Iso7816CommandChannel channel, bool activate_field, bool l
     *result_len = 0;
     if (sw) {
         *sw = 0;
+    }
+
+    if (emv_term_mock_active()) {
+        return emv_term_mock_exchange(channel, activate_field, leave_field_on, apdu, include_le,
+                                      result, max_result_len, result_len, sw);
     }
 
     if (activate_field) {

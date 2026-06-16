@@ -163,3 +163,54 @@ int emv_term_load_from_scan(emv_term_ctx_t *ctx, const char *path) {
     PrintAndLogEx(SUCCESS, "Loaded card TLV from scan: AID=%s", sprint_hex_inrow(ctx->aid, ctx->aid_len));
     return PM3_SUCCESS;
 }
+
+int emv_term_load_card_tlv(emv_term_ctx_t *ctx, const char *path) {
+    if (!ctx || !path || !path[0]) {
+        return PM3_EINVARG;
+    }
+
+    json_error_t error;
+    json_t *root = json_load_file(path, 0, &error);
+    if (!root) {
+        PrintAndLogEx(ERR, "Card TLV load error line %d: %s", error.line, error.text);
+        return PM3_ESOFT;
+    }
+
+    uint8_t aid[APDU_AID_LEN] = {0};
+    size_t aid_len = 0;
+    json_t *jaid = json_object_get(root, "aid");
+    if (json_is_string(jaid)) {
+        int buflen = 0;
+        if (param_gethex_to_eol(json_string_value(jaid), 0, aid, sizeof(aid), &buflen)) {
+            json_decref(root);
+            return PM3_ESOFT;
+        }
+        aid_len = (size_t)buflen;
+        memcpy(ctx->aid, aid, aid_len);
+        ctx->aid_len = aid_len;
+    }
+
+    json_t *tags = json_object_get(root, "tags");
+    if (json_is_array(tags)) {
+        size_t n = json_array_size(tags);
+        for (size_t i = 0; i < n; i++) {
+            json_t *tag = json_array_get(tags, i);
+            if (!json_is_object(tag)) {
+                continue;
+            }
+            tlv_tag_t t = parse_json_tag(tag);
+            if (!t) {
+                continue;
+            }
+            uint8_t value[256] = {0};
+            size_t value_len = 0;
+            if (parse_json_hex_field(tag, "value", value, &value_len, sizeof(value))) {
+                tlvdb_change_or_add_node(ctx->card, t, value_len, value);
+            }
+        }
+    }
+
+    json_decref(root);
+    PrintAndLogEx(INFO, "Loaded card TLV fixture: AID=%s", ctx->aid_len ? sprint_hex_inrow(ctx->aid, ctx->aid_len) : "(none)");
+    return PM3_SUCCESS;
+}

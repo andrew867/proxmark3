@@ -6,6 +6,7 @@
 
 #include "phase_online.h"
 #include "phase_caa.h"
+#include "emv_term_host.h"
 #include "emv_term_tvr.h"
 #include "../emvcore.h"
 #include "ui.h"
@@ -100,6 +101,23 @@ static int build_issuer_auth(emv_term_ctx_t *ctx) {
             tag91[tag91_len++] = 0x88;
             tag91[tag91_len++] = 0x40;
         }
+    } else if (ctx->opts.host_sim || ctx->host_keys_path[0]) {
+        emv_term_host_keys_t keys;
+        int hres;
+        if (ctx->opts.host_keys && ctx->opts.host_keys[0]) {
+            hres = emv_term_host_keys_load(&keys, ctx->opts.host_keys);
+        } else if (ctx->host_keys_path[0]) {
+            hres = emv_term_host_keys_load(&keys, ctx->host_keys_path);
+        } else {
+            hres = emv_term_host_keys_default(&keys, ctx);
+        }
+        if (hres) {
+            return hres;
+        }
+        PrintAndLogEx(INFO, "* Online processing (host-sim)");
+        if (emv_term_host_build_issuer_auth(ctx, &keys, tag91, &tag91_len, sizeof(tag91)) != PM3_SUCCESS) {
+            return PM3_ESOFT;
+        }
     } else {
         const struct tlv *AC = tlvdb_get(ctx->card, 0x9f26, NULL);
         if (AC && AC->len >= 2) {
@@ -134,7 +152,9 @@ int phase_online_run(emv_term_ctx_t *ctx) {
     }
 
     ctx->online_performed = true;
-    PrintAndLogEx(INFO, "\n* Online processing (lab stub)");
+    if (!ctx->opts.host_sim && !(ctx->host_keys_path[0] && !ctx->opts.arpc)) {
+        PrintAndLogEx(INFO, "\n* Online processing (lab stub)");
+    }
 
     if (ctx->opts.arc && ctx->opts.arc[0]) {
         size_t arc_len = 0;

@@ -12,6 +12,7 @@
 //-----------------------------------------------------------------------------
 
 #include "emv_term_ctx.h"
+#include "emv_term_mock.h"
 #include "proxmark3.h"
 #include "util.h"
 #include <string.h>
@@ -84,6 +85,29 @@ int emv_term_ctx_init(emv_term_ctx_t *ctx, const emv_term_cli_opts_t *opts) {
     if (!ctx->events) {
         emv_term_ctx_free(ctx);
         return PM3_EMALLOC;
+    }
+
+    return PM3_SUCCESS;
+}
+
+int emv_term_cli_setup(emv_term_ctx_t *ctx) {
+    if (!ctx) {
+        return PM3_EINVARG;
+    }
+
+    if (ctx->opts.mock_apdu && ctx->opts.mock_apdu[0]) {
+        int res = emv_term_mock_load(ctx->opts.mock_apdu);
+        if (res) {
+            return res;
+        }
+    }
+
+    if (ctx->opts.host_keys && ctx->opts.host_keys[0]) {
+        str_copy(ctx->host_keys_path, sizeof(ctx->host_keys_path), ctx->opts.host_keys);
+    }
+
+    if (ctx->opts.host_sim) {
+        ctx->opts.host_sim = true;
     }
 
     return PM3_SUCCESS;

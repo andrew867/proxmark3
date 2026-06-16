@@ -851,10 +851,16 @@ SRCS =  mifare/aiddesfire.c \
         emv/terminal/phase_complete.c \
         emv/terminal/emv_terminal.c \
         emv/terminal/emv_term_cmd.c \
+        emv/terminal/emv_term_arqc.c \
+        emv/terminal/emv_term_host.c \
+        emv/terminal/emv_term_scheme.c \
+        emv/terminal/emv_term_mock.c \
+        emv/terminal/emv_term_golden.c \
         emv/test/crypto_test.c\
         emv/test/cryptotest.c\
         emv/test/cda_test.c\
         emv/test/terminal_taa_test.c\
+        emv/test/terminal_host_test.c\
         emv/test/dda_test.c\
         emv/test/sda_test.c\
         fido/additional_ca.c \
