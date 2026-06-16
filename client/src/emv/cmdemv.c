@@ -1870,22 +1870,25 @@ static int CmdEMVTest(const char *Cmd) {
     CLIParserInit(&ctx, "emv test",
                   "Executes tests\n",
                   "emv test -i\n"
-                  "emv test --long"
+                  "emv test --long\n"
+                  "emv test --pin-audit"
                  );
 
     void *argtable[] = {
         arg_param_begin,
         arg_lit0("i", "ignore", "Ignore timing tests for VM"),
         arg_lit0("l", "long",   "Run long tests too"),
+        arg_lit0(NULL, "pin-audit", "Verify PIN buffer zeroization (lab audit)"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);
 
     bool ignoreTimeTest = arg_get_lit(ctx, 1);
     bool runSlowTests = arg_get_lit(ctx, 2);
+    bool pinAudit = arg_get_lit(ctx, 3);
     CLIParserFree(ctx);
 
-    return ExecuteCryptoTests(true, ignoreTimeTest, runSlowTests);
+    return ExecuteCryptoTests(true, ignoreTimeTest, runSlowTests, pinAudit);
 }
 
 static int CmdEMVRoca(const char *Cmd) {

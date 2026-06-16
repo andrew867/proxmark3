@@ -16,5 +16,6 @@
 
 int emv_term_session_save_json(const emv_term_ctx_t *ctx, const char *path);
 int emv_term_session_load_json(emv_term_ctx_t *ctx, const char *path);
+int emv_term_session_merge(const char *scan_path, const char *session_path, const char *out_path);
 
 #endif

@@ -6,9 +6,19 @@
 
 #include "phase_restrict.h"
 #include "emv_term_tvr.h"
+#include "emv_term_exception.h"
 #include "ui.h"
 #include <string.h>
 #include <time.h>
+
+static size_t pan_from_card(const struct tlvdb *card, uint8_t *pan, size_t max_len) {
+    const struct tlv *p = tlvdb_get(card, 0x5a, NULL);
+    if (p && p->len && p->len <= max_len) {
+        memcpy(pan, p->value, p->len);
+        return p->len;
+    }
+    return 0;
+}
 
 int phase_restrict_run(emv_term_ctx_t *ctx) {
     if (!ctx) {
@@ -84,6 +94,16 @@ int phase_restrict_run(emv_term_ctx_t *ctx) {
         if (memcmp(ver->value, term_ver->value, 2) > 0) {
             PrintAndLogEx(WARNING, "Application version older than terminal");
             emv_term_tvr_set_bit(ctx, 2, 0x08, true);
+        }
+    }
+
+    if (ctx->exception_file) {
+        uint8_t pan[32] = {0};
+        size_t pan_len = pan_from_card(ctx->card, pan, sizeof(pan));
+        if (pan_len && emv_term_exception_pan_match(ctx->exception_file, pan, pan_len)) {
+            PrintAndLogEx(WARNING, "PAN on exception file");
+            emv_term_tvr_set_bit(ctx, 1, 0x10, true);
+            ctx->restrict_failed = true;
         }
     }
 

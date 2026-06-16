@@ -19,6 +19,10 @@
 #include "emv_term_host.h"
 #include "emv_term_golden.h"
 #include "emv_term_mock.h"
+#include "emv_term_session_view.h"
+#include "emv_term_pin_prompt.h"
+#include "emv_term_secure.h"
+#include "emv_term_redact.h"
 #include "phase_cvm.h"
 #include "phase_online.h"
 #include "phase_complete.h"
@@ -29,7 +33,24 @@
 #include "iso7816/iso7816core.h"
 #include <string.h>
 #include <stdlib.h>
+#include <jansson.h>
 
+static void apply_wave_b_opts(emv_term_cli_opts_t *opts,
+                              const char *exception_file,
+                              const char *capk_extra,
+                              bool no_redact,
+                              bool full_tlv) {
+    if (exception_file && exception_file[0]) {
+        opts->exception_file = exception_file;
+    }
+    if (capk_extra && capk_extra[0]) {
+        opts->capk_extra = capk_extra;
+    }
+    opts->no_redact = no_redact;
+    opts->full_tlv = full_tlv;
+}
+
+static int CmdEMVTerminalSession(const char *Cmd);
 static int CmdHelp(const char *Cmd);
 
 static bool is_scheme_profile_name(const char *s) {
@@ -138,6 +159,10 @@ static int CmdEMVTerminalRun(const char *Cmd) {
         arg_str0(NULL, "mock-apdu-file", "<file>", "Replay CAPDU trace from JSON (no card)"),
         arg_lit0(NULL, "continue-on-bad-arqc", "Continue online after ARQC verify failure"),
         arg_lit0(NULL, "record-apdu", "Record APDU trace (stub — use mock fixtures for CI)"),
+        arg_str0(NULL, "exception-file", "<file>", "PAN blocklist (SHA-256 / pan: lines)"),
+        arg_str0(NULL, "capk-extra", "<file>", "Extra CAPK file merged at ODA init"),
+        arg_lit0(NULL, "no-redact", "Session export without crypto redaction (lab only)"),
+        arg_lit0(NULL, "full-tlv", "Embed Card.TLV snapshot in session JSON"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);
@@ -160,6 +185,11 @@ static int CmdEMVTerminalRun(const char *Cmd) {
     opts.mock_apdu = arg_get_str(ctx, 24)->sval[0];
     opts.continue_on_bad_arqc = arg_get_lit(ctx, 25);
     opts.record_apdu = arg_get_lit(ctx, 26);
+    apply_wave_b_opts(&opts,
+                      arg_get_str(ctx, 27)->sval[0],
+                      arg_get_str(ctx, 28)->sval[0],
+                      arg_get_lit(ctx, 29),
+                      arg_get_lit(ctx, 30));
     opts.use_terminal_profile = opts.param_load_json;
     CLIParserFree(ctx);
 
@@ -224,6 +254,10 @@ static int CmdEMVTerminalStep(const char *Cmd) {
         arg_str0(NULL, "arc",      "<hex>", "ARC for online phase"),
         arg_str0(NULL, "arpc",     "<hex>", "ARPC for online phase"),
         arg_str0(NULL, "arpc-rc",  "<hex>", "ARPC-RC suffix"),
+        arg_str0(NULL, "exception-file", "<file>", "PAN blocklist file"),
+        arg_str0(NULL, "capk-extra", "<file>", "Extra CAPK file"),
+        arg_lit0(NULL, "no-redact", "Session export without redaction"),
+        arg_lit0(NULL, "full-tlv", "Embed Card.TLV in session JSON"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);
@@ -244,6 +278,11 @@ static int CmdEMVTerminalStep(const char *Cmd) {
     opts.arc = arg_get_str(ctx, 16)->sval[0];
     opts.arpc = arg_get_str(ctx, 17)->sval[0];
     opts.arpc_rc = arg_get_str(ctx, 18)->sval[0];
+    apply_wave_b_opts(&opts,
+                      arg_get_str(ctx, 19)->sval[0],
+                      arg_get_str(ctx, 20)->sval[0],
+                      arg_get_lit(ctx, 21),
+                      arg_get_lit(ctx, 22));
     CLIParserFree(ctx);
 
     print_channel(opts.channel);
@@ -251,6 +290,12 @@ static int CmdEMVTerminalStep(const char *Cmd) {
     emv_term_ctx_t term_ctx;
     int res = emv_term_ctx_init(&term_ctx, &opts);
     if (res) {
+        return res;
+    }
+
+    res = emv_term_cli_setup(&term_ctx);
+    if (res) {
+        emv_term_ctx_free(&term_ctx);
         return res;
     }
 
@@ -367,11 +412,13 @@ static int CmdEMVTerminalPin(const char *Cmd) {
     CLIParserInit(&ctx, "emv terminal pin",
                   "Standalone VERIFY PIN for debugging (requires active session/card)",
                   "emv terminal pin --offline 1234\n"
-                  "emv terminal pin --offline 1234 --enciphered -w\n");
+                  "emv terminal pin --offline 1234 --enciphered -w\n"
+                  "emv terminal pin --prompt\n");
 
     void *argtable[] = {
         arg_param_begin,
         arg_str0(NULL, "offline", "<pin>", "Offline PIN digits (4-12)"),
+        arg_lit0(NULL, "prompt", "Interactive PIN prompt (TTY required)"),
         arg_lit0(NULL, "enciphered", "Use enciphered offline PIN (CVM 04)"),
         arg_lit0("a",  "apdu",     "Show APDU requests and responses"),
         arg_lit0("w",  "wired",    "Contact interface"),
@@ -381,14 +428,26 @@ static int CmdEMVTerminalPin(const char *Cmd) {
     CLIExecWithReturn(ctx, Cmd, argtable, true);
 
     const char *pin = arg_get_str(ctx, 1)->sval[0];
-    bool enciphered = arg_get_lit(ctx, 2);
-    bool show_apdu = arg_get_lit(ctx, 3);
-    bool wired = arg_get_lit(ctx, 4);
-    const char *session = arg_get_str(ctx, 5)->sval[0];
+    bool use_prompt = arg_get_lit(ctx, 2);
+    bool enciphered = arg_get_lit(ctx, 3);
+    bool show_apdu = arg_get_lit(ctx, 4);
+    bool wired = arg_get_lit(ctx, 5);
+    const char *session = arg_get_str(ctx, 6)->sval[0];
     CLIParserFree(ctx);
 
+    char prompt_pin[16] = {0};
+    if (use_prompt) {
+        if (emv_term_pin_prompt("Enter offline PIN: ", prompt_pin, sizeof(prompt_pin)) != PM3_SUCCESS) {
+            return PM3_EINVARG;
+        }
+        pin = prompt_pin;
+    } else if ((!pin || !pin[0]) && getenv("EMV_TEST_PIN")) {
+        pin = getenv("EMV_TEST_PIN");
+    }
+
     if (!pin || !pin[0]) {
-        PrintAndLogEx(ERR, "PIN required: use --offline <pin> or EMV_TEST_PIN env var");
+        PrintAndLogEx(ERR, "PIN required: --offline <pin>, --prompt, or EMV_TEST_PIN");
+        emv_term_secure_zero(prompt_pin, sizeof(prompt_pin));
         return PM3_EINVARG;
     }
 
@@ -408,6 +467,7 @@ static int CmdEMVTerminalPin(const char *Cmd) {
 
     SetAPDULogging(show_apdu);
     res = phase_cvm_verify_pin(&term_ctx, pin, enciphered);
+    emv_term_secure_zero(prompt_pin, sizeof(prompt_pin));
     DropFieldEx(opts.channel);
     SetAPDULogging(false);
     emv_term_ctx_free(&term_ctx);
@@ -585,6 +645,116 @@ static int CmdEMVTerminalTest(const char *Cmd) {
     return PM3_EINVARG;
 }
 
+static int CmdEMVTerminalSessionPrint(const char *Cmd) {
+    CLIParserContext *ctx;
+    CLIParserInit(&ctx, "emv terminal session print",
+                  "Human-readable session summary",
+                  "emv terminal session print session.json\n"
+                  "emv terminal session print session.json --json\n");
+
+    void *argtable[] = {
+        arg_param_begin,
+        arg_str1(NULL, NULL, "<file>", "Session JSON path"),
+        arg_lit0("j", "json", "Emit raw JSON instead of summary"),
+        arg_param_end
+    };
+    CLIExecWithReturn(ctx, Cmd, argtable, true);
+
+    const char *file = arg_get_str(ctx, 1)->sval[0];
+    bool as_json = arg_get_lit(ctx, 2);
+    CLIParserFree(ctx);
+
+    return emv_term_session_print(file, as_json);
+}
+
+static int CmdEMVTerminalSessionMerge(const char *Cmd) {
+    CLIParserContext *ctx;
+    CLIParserInit(&ctx, "emv terminal session merge",
+                  "Merge scan JSON with terminal session outcomes",
+                  "emv terminal session merge scan.json session.json -o merged.json\n");
+
+    void *argtable[] = {
+        arg_param_begin,
+        arg_str1(NULL, NULL, "<scan>", "Scan JSON from emv scan"),
+        arg_str1(NULL, NULL, "<session>", "Terminal session JSON"),
+        arg_str0("o", "output", "<file>", "Merged output path"),
+        arg_param_end
+    };
+    CLIExecWithReturn(ctx, Cmd, argtable, true);
+
+    const char *scan = arg_get_str(ctx, 1)->sval[0];
+    const char *session = arg_get_str(ctx, 2)->sval[0];
+    const char *output = arg_get_str(ctx, 3)->sval[0];
+    CLIParserFree(ctx);
+
+    if (!output || !output[0]) {
+        PrintAndLogEx(ERR, "Output path required (-o)");
+        return PM3_EINVARG;
+    }
+    return emv_term_session_merge(scan, session, output);
+}
+
+static int CmdEMVTerminalSessionExport(const char *Cmd) {
+    CLIParserContext *ctx;
+    CLIParserInit(&ctx, "emv terminal session export",
+                  "Re-export session JSON with redaction options",
+                  "emv terminal session export session.json -o out.json\n"
+                  "emv terminal session export session.json -o out.json --no-redact\n");
+
+    void *argtable[] = {
+        arg_param_begin,
+        arg_str1(NULL, NULL, "<file>", "Input session JSON"),
+        arg_str0("o", "output", "<file>", "Output path (default: overwrite input)"),
+        arg_lit0(NULL, "no-redact", "Export full cryptogram hex (lab only)"),
+        arg_lit0(NULL, "full-tlv", "Include Card.TLV if present in source"),
+        arg_param_end
+    };
+    CLIExecWithReturn(ctx, Cmd, argtable, true);
+
+    const char *input = arg_get_str(ctx, 1)->sval[0];
+    const char *output = arg_get_str(ctx, 2)->sval[0];
+    bool no_redact = arg_get_lit(ctx, 3);
+    bool full_tlv = arg_get_lit(ctx, 4);
+    CLIParserFree(ctx);
+
+    json_error_t error;
+    json_t *root = json_load_file(input, 0, &error);
+    if (!root) {
+        PrintAndLogEx(ERR, "Session load error: %s", error.text);
+        return PM3_ESOFT;
+    }
+
+    if (!no_redact) {
+        emv_term_redact_session_json(root, false);
+    } else {
+        PrintAndLogEx(WARNING, "Session export without redaction (lab only)");
+    }
+
+    const char *outpath = (output && output[0]) ? output : input;
+    (void)full_tlv;
+    int res = json_dump_file(root, outpath, JSON_INDENT(2));
+    json_decref(root);
+
+    if (res) {
+        PrintAndLogEx(ERR, "Failed to write: %s", outpath);
+        return PM3_ESOFT;
+    }
+    PrintAndLogEx(SUCCESS, "Session exported: %s", outpath);
+    return PM3_SUCCESS;
+}
+
+static command_t SessionCommandTable[] = {
+    {"print",  CmdEMVTerminalSessionPrint,  AlwaysAvailable, "Print session summary"},
+    {"merge",  CmdEMVTerminalSessionMerge,  AlwaysAvailable, "Merge scan + session JSON"},
+    {"export", CmdEMVTerminalSessionExport, AlwaysAvailable, "Re-export session with redaction"},
+    {NULL, NULL, NULL, NULL}
+};
+
+static int CmdEMVTerminalSession(const char *Cmd) {
+    clearCommandBuffer();
+    return CmdsParse(SessionCommandTable, Cmd);
+}
+
 static command_t TerminalCommandTable[] = {
     {"help",    CmdHelp,              AlwaysAvailable, "This help"},
     {"run",     CmdEMVTerminalRun,    IfPm3Iso14443,   "Run full terminal phase loop"},
@@ -595,6 +765,7 @@ static command_t TerminalCommandTable[] = {
     {"load",    CmdEMVTerminalLoad,   AlwaysAvailable, "Load card data from scan JSON"},
     {"host-sim", CmdEMVTerminalHostSim, IfPm3Iso14443, "Host simulator online completion"},
     {"test",    CmdEMVTerminalTest,   AlwaysAvailable, "Golden regression fixtures (no USB)"},
+    {"session", CmdEMVTerminalSession, AlwaysAvailable, "Session print / merge / export"},
     {NULL, NULL, NULL, NULL}
 };
 

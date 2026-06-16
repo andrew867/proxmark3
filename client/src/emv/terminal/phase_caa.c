@@ -80,7 +80,15 @@ static int gen_ac(emv_term_ctx_t *ctx, uint8_t ref_control, struct tlv *cdol_tlv
     if (is_ac1 && ctx->tr_type == TT_CDA) {
         struct tlvdb *ac_tlv = tlvdb_parse_multi(buf, len);
         if (ac_tlv && tlvdb_get(ac_tlv, 0x9f4b, NULL)) {
-            trCDA(ctx->card, ac_tlv, ctx->pdol_data_tlv, cdol_tlv);
+            ctx->cda_verify_performed = true;
+            if (trCDA(ctx->card, ac_tlv, ctx->pdol_data_tlv, cdol_tlv) == 0) {
+                ctx->cda_verify_ok = true;
+                PrintAndLogEx(SUCCESS, "CDA verify: OK");
+            } else {
+                ctx->cda_verify_ok = false;
+                emv_term_tvr_set_bit(ctx, 4, 0x04, true);
+                PrintAndLogEx(WARNING, "CDA verify: FAIL");
+            }
         }
         if (ac_tlv) {
             free(ac_tlv);

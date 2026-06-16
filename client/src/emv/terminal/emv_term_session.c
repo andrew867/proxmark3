@@ -12,12 +12,23 @@
 //-----------------------------------------------------------------------------
 
 #include "emv_term_session.h"
+#include "emv_term_tvr.h"
 #include "../emvjson.h"
+#include "emv_term_redact.h"
 #include "ui.h"
 #include "util.h"
 #include "commonutil.h"
 #include <jansson.h>
 #include <string.h>
+#include <stdlib.h>
+
+static bool session_no_redact(const emv_term_ctx_t *ctx) {
+    if (ctx->opts.no_redact) {
+        return true;
+    }
+    const char *env = getenv("EMV_TERMINAL_FULL_SESSION");
+    return env && env[0] && strcmp(env, "0") != 0;
+}
 
 static void mask_pan(char *out, size_t outlen, const uint8_t *pan, size_t panlen) {
     if (!out || outlen == 0) {
@@ -66,6 +77,12 @@ int emv_term_session_save_json(const emv_term_ctx_t *ctx, const char *path) {
 
     JsonSaveStr(terminal, "Profile", ctx->opts.profile_path ? ctx->opts.profile_path : "default");
     JsonSaveStr(terminal, "Channel", ctx->channel == CC_CONTACT ? "contact" : "contactless");
+    if (ctx->opts.exception_file && ctx->opts.exception_file[0]) {
+        JsonSaveStr(terminal, "ExceptionFile", ctx->opts.exception_file);
+    }
+    if (ctx->scheme_name[0]) {
+        JsonSaveStr(terminal, "Scheme", ctx->scheme_name);
+    }
     json_object_set_new(root, "Terminal", terminal);
 
     JsonSaveStr(root, "Outcome", emv_term_outcome_str(ctx->outcome));
@@ -102,6 +119,18 @@ int emv_term_session_save_json(const emv_term_ctx_t *ctx, const char *path) {
 
     json_object_set_new(root, "Card", card);
 
+    if (ctx->opts.full_tlv) {
+        json_t *tlv_arr = json_array();
+        struct tlvdb *child = ctx->card->children;
+        while (child) {
+            json_t *snap = json_object();
+            json_array_append_new(tlv_arr, snap);
+            JsonSaveTLVTreeElm(snap, "$", child, true, true, false);
+            child = tlvdb_elm_get_next(child);
+        }
+        json_object_set_new(card, "TLV", tlv_arr);
+    }
+
     const struct tlv *cid = tlvdb_get(ctx->card, 0x9f27, NULL);
     const struct tlv *ac = tlvdb_get(ctx->card, 0x9f26, NULL);
     const struct tlv *atc = tlvdb_get(ctx->card, 0x9f36, NULL);
@@ -122,7 +151,20 @@ int emv_term_session_save_json(const emv_term_ctx_t *ctx, const char *path) {
     if (ac && ac->len) {
         JsonSaveBufAsHexCompact(crypto, "AC", (uint8_t *)ac->value, ac->len);
     }
+    if (ctx->cda_verify_performed) {
+        JsonSaveStr(crypto, "CDAVerify", ctx->cda_verify_ok ? "ok" : "fail");
+    }
     json_object_set_new(root, "Cryptogram", crypto);
+
+    uint8_t tvr[5] = {0};
+    emv_term_tvr_get((emv_term_ctx_t *)ctx, tvr);
+    JsonSaveBufAsHexCompact(root, "TVR", tvr, 5);
+
+    if (!session_no_redact(ctx)) {
+        emv_term_redact_session_json(root, false);
+    } else {
+        PrintAndLogEx(WARNING, "Session export without redaction (lab only)");
+    }
 
     int res = json_dump_file(root, path, JSON_INDENT(2));
     json_decref(root);
@@ -198,5 +240,76 @@ int emv_term_session_load_json(emv_term_ctx_t *ctx, const char *path) {
     str_copy(ctx->session_file, sizeof(ctx->session_file), path);
     json_decref(root);
     PrintAndLogEx(SUCCESS, "Session loaded: %s", path);
+    return PM3_SUCCESS;
+}
+
+static bool aid_hex_match(json_t *a, json_t *b) {
+    if (!json_is_string(a) || !json_is_string(b)) {
+        return true;
+    }
+    return strcmp(json_string_value(a), json_string_value(b)) == 0;
+}
+
+int emv_term_session_merge(const char *scan_path, const char *session_path, const char *out_path) {
+    if (!scan_path || !session_path || !out_path) {
+        return PM3_EINVARG;
+    }
+
+    json_error_t error;
+    json_t *scan = json_load_file(scan_path, 0, &error);
+    if (!scan) {
+        PrintAndLogEx(ERR, "Scan load error: %s", error.text);
+        return PM3_ESOFT;
+    }
+    json_t *sess = json_load_file(session_path, 0, &error);
+    if (!sess) {
+        json_decref(scan);
+        PrintAndLogEx(ERR, "Session load error: %s", error.text);
+        return PM3_ESOFT;
+    }
+
+    json_t *scan_aid = json_path_get(scan, "$.Application.AID");
+    json_t *sess_card = json_object_get(sess, "Card");
+    json_t *sess_aid = json_is_object(sess_card) ? json_object_get(sess_card, "AID") : NULL;
+    if (!aid_hex_match(scan_aid, sess_aid)) {
+        json_decref(scan);
+        json_decref(sess);
+        PrintAndLogEx(ERR, "Merge rejected: AID mismatch between scan and session");
+        return PM3_EINVARG;
+    }
+
+    json_t *out = json_object();
+    json_t *file = json_object();
+    JsonSaveStr(file, "Created", "proxmark3 emv terminal merge");
+    JsonSaveStr(file, "Version", "1");
+    json_object_set_new(out, "File", file);
+    json_object_set_new(out, "Scan", scan);
+    json_t *term = json_object_get(sess, "Terminal");
+    if (term) {
+        json_object_set_new(out, "Terminal", json_deep_copy(term));
+    }
+    json_t *outcome = json_object_get(sess, "Outcome");
+    if (outcome) {
+        json_object_set_new(out, "Outcome", json_deep_copy(outcome));
+    }
+    json_t *phases = json_object_get(sess, "Phases");
+    if (phases) {
+        json_object_set_new(out, "Phases", json_deep_copy(phases));
+    }
+    json_t *crypto = json_object_get(sess, "Cryptogram");
+    if (crypto) {
+        json_object_set_new(out, "Cryptogram", json_deep_copy(crypto));
+    }
+
+    emv_term_redact_session_json(out, false);
+    int res = json_dump_file(out, out_path, JSON_INDENT(2));
+    json_decref(out);
+    json_decref(sess);
+
+    if (res) {
+        PrintAndLogEx(ERR, "Failed to write merged JSON: %s", out_path);
+        return PM3_ESOFT;
+    }
+    PrintAndLogEx(SUCCESS, "Merged session: %s", out_path);
     return PM3_SUCCESS;
 }

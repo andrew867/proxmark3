@@ -14,6 +14,9 @@
 #include "phase_cvm.h"
 #include "../emv_pki.h"
 #include "../crypto.h"
+#include "emv_term_pin_prompt.h"
+#include "emv_term_secure.h"
+#include "emv_term_tvr.h"
 #include "ui.h"
 #include "protocols.h"
 #include "commonutil.h"
@@ -24,12 +27,17 @@
 #define CVM_PLAIN_OFFLINE       0x01
 #define CVM_ENCIPHERED_ONLINE   0x02
 #define CVM_ENCIPHERED_OFFLINE  0x04
+#define CVM_SIGNATURE           0x1E
 #define CVM_NO_CVM              0x1F
 #define CVM_FAIL                0x00
 #define CVM_NOT_ALLOWED         0x3F
 
 #define CVM_COND_ALWAYS         0x00
 #define CVM_COND_TERM_SUPPORTS  0x03
+#define CVM_COND_AMT_LE_X       0x06
+#define CVM_COND_AMT_GT_X      0x07
+#define CVM_COND_AMT_LE_Y       0x08
+#define CVM_COND_AMT_GT_Y       0x09
 
 #define CVM_RESULT_UNKNOWN      0x00
 #define CVM_RESULT_FAILED       0x01
@@ -44,9 +52,21 @@ static uint32_t cvm_get_amount(const unsigned char *S) {
 #define TVR_ONLINE_PIN_ENTERED          (1 << 3)  // byte 3 bit 3
 
 void emv_term_pin_zeroize(uint8_t *buf, size_t len) {
-    if (buf && len) {
-        memset(buf, 0, len);
+    emv_term_secure_zero(buf, len);
+}
+
+static const char *resolve_pin(emv_term_ctx_t *ctx, char *prompt_buf, size_t prompt_buf_len) {
+    if (ctx->opts.pin && ctx->opts.pin[0]) {
+        return ctx->opts.pin;
     }
+    const char *env = getenv("EMV_TEST_PIN");
+    if (env && env[0]) {
+        return env;
+    }
+    if (emv_term_pin_prompt("Enter offline PIN: ", prompt_buf, prompt_buf_len) == PM3_SUCCESS) {
+        return prompt_buf;
+    }
+    return NULL;
 }
 
 static size_t pin_digits_len(const char *pin) {
@@ -134,13 +154,24 @@ static bool terminal_supports_cvm(const emv_term_ctx_t *ctx, uint8_t cvm_code) {
 }
 
 static bool cvm_condition_ok(const emv_term_ctx_t *ctx, uint8_t condition, uint32_t amount_x, uint32_t amount_y) {
-    (void)amount_x;
-    (void)amount_y;
+    uint64_t txn_amt = 0;
+    const struct tlv *amount = tlvdb_get(ctx->card, 0x9f02, NULL);
+    if (amount && amount->len) {
+        txn_amt = emv_term_bcd_to_uint(amount->value, amount->len);
+    }
+
     switch (condition) {
         case CVM_COND_ALWAYS:
-            return true;
         case CVM_COND_TERM_SUPPORTS:
             return true;
+        case CVM_COND_AMT_LE_X:
+            return txn_amt <= amount_x;
+        case CVM_COND_AMT_GT_X:
+            return txn_amt > amount_x;
+        case CVM_COND_AMT_LE_Y:
+            return txn_amt <= amount_y;
+        case CVM_COND_AMT_GT_Y:
+            return txn_amt > amount_y;
         default:
             return true;
     }
@@ -149,6 +180,10 @@ static bool cvm_condition_ok(const emv_term_ctx_t *ctx, uint8_t condition, uint3
 static bool interac_contactless_skip_cvm(const emv_term_ctx_t *ctx) {
     if (ctx->channel != CC_CONTACTLESS) {
         return false;
+    }
+    if (ctx->flash_skip_offline_pin) {
+        PrintAndLogEx(INFO, "Scheme profile: skip offline PIN on contactless");
+        return true;
     }
     if (GetCardPSVendor((uint8_t *)ctx->aid, ctx->aid_len) != CV_INTERAC) {
         return false;
@@ -309,13 +344,8 @@ int phase_cvm_run(emv_term_ctx_t *ctx) {
     uint32_t amount_x = cvm_get_amount(cvm_list->value);
     uint32_t amount_y = cvm_get_amount(cvm_list->value + 4);
 
-    const char *pin = ctx->opts.pin;
-    if (!pin || !pin[0]) {
-        const char *env = getenv("EMV_TEST_PIN");
-        if (env && env[0]) {
-            pin = env;
-        }
-    }
+    char prompt_pin[16] = {0};
+    const char *pin = resolve_pin(ctx, prompt_pin, sizeof(prompt_pin));
 
     for (size_t i = 8; i + 1 < cvm_list->len; i += 2) {
         uint8_t cvm_code = cvm_list->value[i] & 0x3F;
@@ -343,11 +373,20 @@ int phase_cvm_run(emv_term_ctx_t *ctx) {
 
             case CVM_FAIL:
                 set_cvm_results(ctx, cvm_code, condition, CVM_RESULT_FAILED);
-                update_tvr_bit(ctx, 2, TVR_OFFLINE_PIN_NOT_PERFORMED, true);
+                update_tvr_bit(ctx, 2, 0x80, true);
+                emv_term_secure_zero(prompt_pin, sizeof(prompt_pin));
                 return PM3_ESOFT;
 
             case CVM_NOT_ALLOWED:
                 continue;
+
+            case CVM_SIGNATURE:
+                PrintAndLogEx(INFO, "CVM: signature (paper)");
+                set_cvm_results(ctx, cvm_code, condition, CVM_RESULT_UNKNOWN);
+                ctx->cvm_performed = true;
+                ctx->cvm_success = true;
+                emv_term_secure_zero(prompt_pin, sizeof(prompt_pin));
+                return PM3_SUCCESS;
 
             case CVM_PLAIN_OFFLINE:
                 if (!pin || !pin[0]) {
@@ -387,11 +426,17 @@ int phase_cvm_run(emv_term_ctx_t *ctx) {
                     PrintAndLogEx(INFO, "Online PIN CVM skipped (--cvm-skip-online)");
                     update_tvr_bit(ctx, 2, TVR_ONLINE_PIN_ENTERED, true);
                     set_cvm_results(ctx, cvm_code, condition, CVM_RESULT_UNKNOWN);
+                    emv_term_secure_zero(prompt_pin, sizeof(prompt_pin));
                     return PM3_SUCCESS;
                 }
-                PrintAndLogEx(INFO, "Online PIN required — setting TVR bit (no live host in v1)");
+                if (pin && pin[0]) {
+                    build_plain_pin_block(ctx->online_pin_block, pin, pin_digits_len(pin));
+                    ctx->online_pin_block_len = 8;
+                    PrintAndLogEx(INFO, "Online PIN captured for host/CDOL (block stashed)");
+                }
                 update_tvr_bit(ctx, 2, TVR_ONLINE_PIN_ENTERED, true);
                 set_cvm_results(ctx, cvm_code, condition, CVM_RESULT_UNKNOWN);
+                emv_term_secure_zero(prompt_pin, sizeof(prompt_pin));
                 return PM3_SUCCESS;
 
             default:
@@ -400,6 +445,7 @@ int phase_cvm_run(emv_term_ctx_t *ctx) {
         }
     }
 
+    emv_term_secure_zero(prompt_pin, sizeof(prompt_pin));
     PrintAndLogEx(WARNING, "CVM processing exhausted without success");
     update_tvr_bit(ctx, 2, TVR_OFFLINE_PIN_NOT_PERFORMED, true);
     return PM3_ESOFT;

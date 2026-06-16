@@ -13,6 +13,9 @@
 
 #include "emv_term_ctx.h"
 #include "emv_term_mock.h"
+#include "emv_term_exception.h"
+#include "emv_term_secure.h"
+#include "../emv_pk.h"
 #include "proxmark3.h"
 #include "util.h"
 #include <string.h>
@@ -110,6 +113,14 @@ int emv_term_cli_setup(emv_term_ctx_t *ctx) {
         ctx->opts.host_sim = true;
     }
 
+    if (ctx->opts.exception_file && ctx->opts.exception_file[0]) {
+        ctx->exception_file = emv_term_exception_load(ctx->opts.exception_file);
+    }
+
+    if (ctx->opts.capk_extra && ctx->opts.capk_extra[0]) {
+        emv_pk_load_extra_file(ctx->opts.capk_extra);
+    }
+
     return PM3_SUCCESS;
 }
 
@@ -136,6 +147,10 @@ void emv_term_ctx_free(emv_term_ctx_t *ctx) {
     ctx->events = NULL;
     ctx->event_count = 0;
     ctx->event_cap = 0;
+
+    emv_term_exception_free(ctx->exception_file);
+    ctx->exception_file = NULL;
+    emv_term_secure_zero(ctx->online_pin_block, sizeof(ctx->online_pin_block));
 
     memset(ctx, 0, sizeof(*ctx));
 }

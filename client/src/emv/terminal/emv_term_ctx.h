@@ -81,6 +81,10 @@ typedef struct {
     bool host_sim;
     bool continue_on_bad_arqc;
     bool record_apdu;
+    const char *exception_file;
+    const char *capk_extra;
+    bool no_redact;
+    bool full_tlv;
 } emv_term_cli_opts_t;
 
 typedef struct emv_term_ctx {
@@ -127,6 +131,12 @@ typedef struct emv_term_ctx {
     char host_keys_path[FILE_PATH_SIZE];
     char scheme_name[32];
     bool host_arqc_ok;
+    bool flash_skip_offline_pin;
+    bool cda_verify_ok;
+    bool cda_verify_performed;
+    uint8_t online_pin_block[16];
+    size_t online_pin_block_len;
+    struct emv_term_exception_file *exception_file;
 } emv_term_ctx_t;
 
 const char *emv_term_phase_name(emv_term_phase_t phase);
