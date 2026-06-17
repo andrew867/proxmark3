@@ -13,6 +13,10 @@
 
 #include "emv_term_ctx.h"
 #include "emv_term_mock.h"
+#include "emv_term_exception.h"
+#include "emv_term_secure.h"
+#include "emv_term_pcap.h"
+#include "../emv_pk.h"
 #include "proxmark3.h"
 #include "util.h"
 #include <string.h>
@@ -110,6 +114,22 @@ int emv_term_cli_setup(emv_term_ctx_t *ctx) {
         ctx->opts.host_sim = true;
     }
 
+    if (ctx->opts.exception_file && ctx->opts.exception_file[0]) {
+        ctx->exception_file = emv_term_exception_load(ctx->opts.exception_file);
+    }
+
+    if (ctx->opts.capk_extra && ctx->opts.capk_extra[0]) {
+        emv_pk_load_extra_file(ctx->opts.capk_extra);
+    }
+
+    if (ctx->opts.pcap_out && ctx->opts.pcap_out[0]) {
+        bool redact = !ctx->opts.no_redact;
+        int pres = emv_term_pcap_open(ctx->opts.pcap_out, redact);
+        if (pres) {
+            return pres;
+        }
+    }
+
     return PM3_SUCCESS;
 }
 
@@ -137,6 +157,11 @@ void emv_term_ctx_free(emv_term_ctx_t *ctx) {
     ctx->event_count = 0;
     ctx->event_cap = 0;
 
+    emv_term_exception_free(ctx->exception_file);
+    ctx->exception_file = NULL;
+    emv_term_secure_zero(ctx->online_pin_block, sizeof(ctx->online_pin_block));
+    emv_term_pcap_close();
+
     memset(ctx, 0, sizeof(*ctx));
 }
 
@@ -160,6 +185,7 @@ int emv_term_event_add(emv_term_ctx_t *ctx, emv_term_phase_t phase, int result, 
     e->result = result;
     e->sw = sw;
     e->ts_ms = (uint64_t)time(NULL) * 1000ULL;
+    e->duration_ms = 0;
     e->note[0] = '\0';
     if (note) {
         str_copy(e->note, sizeof(e->note), note);
@@ -171,6 +197,15 @@ int emv_term_event_add(emv_term_ctx_t *ctx, emv_term_phase_t phase, int result, 
     }
 
     return PM3_SUCCESS;
+}
+
+int emv_term_event_add_timed(emv_term_ctx_t *ctx, emv_term_phase_t phase, int result, uint16_t sw,
+                             const char *note, uint32_t duration_ms) {
+    int res = emv_term_event_add(ctx, phase, result, sw, note);
+    if (res == PM3_SUCCESS && ctx->event_count > 0) {
+        ctx->events[ctx->event_count - 1].duration_ms = duration_ms;
+    }
+    return res;
 }
 
 struct tlvdb *emv_term_get_root(emv_term_ctx_t *ctx) {

@@ -39,7 +39,7 @@
 #include "crypto/libpcrypto.h"
 #include "iso4217.h"        // currency lookup
 #include "terminal/emv_term_cmd.h"
-#include "terminal/emv_term_ctx.h"
+#include "terminal/emv_term_reader_session.h"
 #include "terminal/phase_init.h"
 #include "terminal/phase_oda.h"
 #include "terminal/emv_transaction.h"
@@ -1870,22 +1870,25 @@ static int CmdEMVTest(const char *Cmd) {
     CLIParserInit(&ctx, "emv test",
                   "Executes tests\n",
                   "emv test -i\n"
-                  "emv test --long"
+                  "emv test --long\n"
+                  "emv test --pin-audit"
                  );
 
     void *argtable[] = {
         arg_param_begin,
         arg_lit0("i", "ignore", "Ignore timing tests for VM"),
         arg_lit0("l", "long",   "Run long tests too"),
+        arg_lit0(NULL, "pin-audit", "Verify PIN buffer zeroization (lab audit)"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);
 
     bool ignoreTimeTest = arg_get_lit(ctx, 1);
     bool runSlowTests = arg_get_lit(ctx, 2);
+    bool pinAudit = arg_get_lit(ctx, 3);
     CLIParserFree(ctx);
 
-    return ExecuteCryptoTests(true, ignoreTimeTest, runSlowTests);
+    return ExecuteCryptoTests(true, ignoreTimeTest, runSlowTests, pinAudit);
 }
 
 static int CmdEMVRoca(const char *Cmd) {
@@ -2174,6 +2177,8 @@ static int CmdEMVReader(const char *Cmd) {
         arg_lit0("w", "wired", "Send data via contact (iso7816) interface. (def: Contactless interface)"),
         arg_lit0("v", "verbose", "Verbose output"),
         arg_lit0("@",  NULL,   "continuous reader mode"),
+        arg_str0(NULL, "terminal-session", "<file>", "Append reader observations to session JSON"),
+        arg_lit0(NULL, "terminal-compare", "Hint: diff reader vs terminal APDU patterns"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);
@@ -2186,7 +2191,18 @@ static int CmdEMVReader(const char *Cmd) {
     uint8_t psenum = (channel == CC_CONTACT) ? 1 : 2;
     bool verbose = arg_get_lit(ctx, 2);
     bool continuous = arg_get_lit(ctx, 3);
+    const char *term_session = arg_get_str(ctx, 4)->sval[0];
+    bool term_compare = arg_get_lit(ctx, 5);
     CLIParserFree(ctx);
+
+    if (term_compare) {
+        emv_term_reader_compare_hint();
+    }
+
+    if (channel == CC_CONTACT && IfPm3Smartcard() == false) {
+        PrintAndLogEx(WARNING, "PM3 does not have SMARTCARD support. Exiting.");
+        return PM3_EDEVNOTSUPP;
+    }
 
     if (continuous) {
         PrintAndLogEx(INFO, "Press " _GREEN_("<Enter>") " to exit");
@@ -2247,6 +2263,12 @@ static int CmdEMVReader(const char *Cmd) {
 
         // decode application parts
         emv_parse_card_details(buf, len, verbose);
+
+        if (term_session && term_session[0]) {
+            char note[128] = {0};
+            snprintf(note, sizeof(note), "reader select AID=%s", sprint_hex_inrow(AID, AIDlen));
+            emv_term_reader_session_log(term_session, sprint_hex_inrow(AID, AIDlen), note);
+        }
 
         // transaction log information
         uint8_t log_file_id = 0x0B;

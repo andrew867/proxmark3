@@ -5,6 +5,7 @@
 //-----------------------------------------------------------------------------
 
 #include "phase_complete.h"
+#include "phase_scripts.h"
 #include "emv_transaction.h"
 #include "emv_term_tvr.h"
 #include "ui.h"
@@ -15,6 +16,10 @@ int phase_complete_run(emv_term_ctx_t *ctx) {
     }
 
     PrintAndLogEx(INFO, "\n* Completion");
+
+    if (ctx->online_success || ctx->ac2_performed) {
+        phase_scripts_run(ctx, 0x72, false);
+    }
 
     if (ctx->outcome == EMV_OUTCOME_UNKNOWN) {
         if (ctx->ac2_performed && (ctx->ac2_cid & 0xC0) == EMVAC_TC_BYTE) {

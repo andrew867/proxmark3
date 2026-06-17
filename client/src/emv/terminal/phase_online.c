@@ -6,7 +6,9 @@
 
 #include "phase_online.h"
 #include "phase_caa.h"
+#include "phase_scripts.h"
 #include "emv_term_host.h"
+#include "emv_term_host_tcp.h"
 #include "emv_term_tvr.h"
 #include "../emvcore.h"
 #include "ui.h"
@@ -24,50 +26,6 @@ static int parse_hex_field(const char *hex, uint8_t *out, size_t *out_len, size_
         return PM3_ESOFT;
     }
     *out_len = (size_t)buflen;
-    return PM3_SUCCESS;
-}
-
-static int run_issuer_script(emv_term_ctx_t *ctx, const uint8_t *script, size_t script_len, bool before_ac2) {
-    if (!script || script_len < 2) {
-        return PM3_SUCCESS;
-    }
-
-    PrintAndLogEx(INFO, "Issuer script (%s AC2): %zu bytes",
-                  before_ac2 ? "before" : "after", script_len);
-
-    const unsigned char *p = script;
-    size_t left = script_len;
-    while (left >= 2) {
-        struct tlv e;
-        if (!tlv_parse_tl(&p, &left, &e)) {
-            break;
-        }
-        if (e.tag == 0x86 && e.len >= 4) {
-            sAPDU_t apdu = {
-                .CLA = e.value[0],
-                .INS = e.value[1],
-                .P1 = e.value[2],
-                .P2 = e.value[3],
-                .Lc = (uint8_t)(e.len > 4 ? e.len - 4 : 0),
-                .data = (uint8_t *)(e.len > 4 ? e.value + 4 : NULL),
-            };
-            uint8_t buf[APDU_RES_LEN] = {0};
-            size_t len = 0;
-            uint16_t sw = 0;
-            int res = EMVExchange(ctx->channel, true, apdu, buf, sizeof(buf), &len, &sw, ctx->card);
-            if (res || sw != 0x9000) {
-                PrintAndLogEx(WARNING, "Issuer script command failed SW=%04x", sw);
-                if (before_ac2) {
-                    emv_term_tvr_set_bit(ctx, 3, 0x40, true);
-                } else {
-                    emv_term_tvr_set_bit(ctx, 3, 0x20, true);
-                }
-                return PM3_ESOFT;
-            }
-        }
-    }
-
-    emv_term_tsi_set_bit(ctx, 0, 0x04, true);
     return PM3_SUCCESS;
 }
 
@@ -100,6 +58,26 @@ static int build_issuer_auth(emv_term_ctx_t *ctx) {
         } else if (GetCardPSVendor(ctx->aid, ctx->aid_len) == CV_INTERAC) {
             tag91[tag91_len++] = 0x88;
             tag91[tag91_len++] = 0x40;
+        }
+    } else if (ctx->opts.host_tcp && ctx->opts.host_tcp[0]) {
+        emv_term_host_keys_t keys;
+        int hres = emv_term_host_keys_default(&keys, ctx);
+        if (hres) {
+            return hres;
+        }
+        emv_term_host_tcp_resp_t tcp_resp;
+        PrintAndLogEx(INFO, "* Online processing (TCP host %s)", ctx->opts.host_tcp);
+        if (emv_term_host_tcp_request(ctx, ctx->opts.host_tcp, &keys, &tcp_resp) != PM3_SUCCESS) {
+            return PM3_ESOFT;
+        }
+        ctx->host_tcp_applied = true;
+        if (parse_hex_field(tcp_resp.arpc, tag91, &tag91_len, sizeof(tag91)) != PM3_SUCCESS) {
+            return PM3_ESOFT;
+        }
+        if (tcp_resp.arpc_rc[0]) {
+            size_t rc_len = 0;
+            parse_hex_field(tcp_resp.arpc_rc, tag91 + tag91_len, &rc_len, sizeof(tag91) - tag91_len);
+            tag91_len += rc_len;
         }
     } else if (ctx->opts.host_sim || ctx->host_keys_path[0]) {
         emv_term_host_keys_t keys;
@@ -200,7 +178,7 @@ int phase_online_run(emv_term_ctx_t *ctx) {
 
     const struct tlv *s71 = tlvdb_get(ctx->card, 0x71, NULL);
     if (s71 && s71->len) {
-        run_issuer_script(ctx, s71->value, s71->len, true);
+        phase_scripts_run(ctx, 0x71, true);
     }
 
     return phase_caa_ac2(ctx);

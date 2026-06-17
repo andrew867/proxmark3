@@ -157,6 +157,7 @@ int emv_term_scheme_apply(emv_term_ctx_t *ctx, const emv_term_scheme_info_t *inf
     }
 
     str_copy(ctx->scheme_name, sizeof(ctx->scheme_name), info->name);
+    ctx->flash_skip_offline_pin = info->flash_skip_offline_pin;
     if (info->host_keys_path[0]) {
         str_copy(ctx->host_keys_path, sizeof(ctx->host_keys_path), info->host_keys_path);
     }

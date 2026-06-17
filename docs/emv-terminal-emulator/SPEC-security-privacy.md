@@ -1,5 +1,8 @@
 # SPEC: Security and Privacy
 
+> **FOR RESEARCH AND LAB USE ONLY — NO WARRANTY — PROVIDED AS-IS**  
+> Operators must read [README.md](./README.md) and [OPERATOR-GUIDE.md](./OPERATOR-GUIDE.md) before use.
+
 ## Purpose
 
 Define how the terminal emulator handles sensitive data and legal/ethical boundaries.

@@ -24,6 +24,7 @@
 #include "cmdsmartcard.h" // ExchangeAPDUSC
 #include "ui.h"
 #include "emv/terminal/emv_term_mock.h"
+#include "emv/terminal/emv_term_pcap.h"
 #include "cmdhf14a.h"
 #include "cmdhf14b.h"
 #include "iso14b.h"      // iso14b_raw_cmd_t
@@ -186,10 +187,12 @@ int Iso7816ExchangeEx(Iso7816CommandChannel channel, bool activate_field, bool l
                 PrintAndLogEx(ERR, "APDU chaining len " _RED_("%02x"), *sw & 0xFF);
             } else {
                 PrintAndLogEx(ERR, "APDU (%02x%02x) ERROR... " _RED_("%4X") " - %s", apdu.CLA, apdu.INS, isw, GetAPDUCodeDescription(*sw >> 8, *sw & 0xFF));
+                emv_term_pcap_record(data, (size_t)datalen, result, *result_len, isw);
                 return 5;
             }
         }
     }
+    emv_term_pcap_record(data, (size_t)datalen, result, *result_len, isw);
     return PM3_SUCCESS;
 }
 

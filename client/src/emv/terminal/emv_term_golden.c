@@ -200,10 +200,33 @@ static int run_phases_fixture(const char *dir, const char *name, json_t *run, js
         return PM3_ESOFT;
     }
 
+    char exc_path[FILE_PATH_SIZE] = {0};
+    char pin_buf[16] = {0};
     emv_term_cli_opts_t opts = {0};
+
+    json_t *jexc = json_object_get(run, "exception_file");
+    if (json_is_string(jexc)) {
+        fixture_path(dir, name, json_string_value(jexc), exc_path, sizeof(exc_path));
+        opts.exception_file = exc_path;
+    }
+    json_t *jpin = json_object_get(run, "pin");
+    if (json_is_string(jpin)) {
+        str_copy(pin_buf, sizeof(pin_buf), json_string_value(jpin));
+        opts.pin = pin_buf;
+    }
+    if (json_is_true(json_object_get(run, "cvm_skip_online"))) {
+        opts.cvm_skip_online = true;
+    }
+
     emv_term_ctx_t ctx;
     int res = emv_term_ctx_init(&ctx, &opts);
     if (res) {
+        return res;
+    }
+
+    res = emv_term_cli_setup(&ctx);
+    if (res) {
+        emv_term_ctx_free(&ctx);
         return res;
     }
 

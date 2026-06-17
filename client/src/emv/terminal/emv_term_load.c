@@ -6,6 +6,7 @@
 
 #include "emv_term_load.h"
 #include "../emvjson.h"
+#include "../tlv.h"
 #include "ui.h"
 #include "util.h"
 #include "commonutil.h"
@@ -105,6 +106,97 @@ static void load_application_data(struct tlvdb *root, json_t *doc) {
     JsonLoadApplicationData(doc, root);
 }
 
+static struct tlv *encode_target_tlv(const struct tlvdb *parsed, uint8_t sfi) {
+    const struct tlvdb *target = parsed;
+    if (sfi < 11) {
+        const struct tlvdb *child = tlvdb_elm_get_children(parsed);
+        if (child) {
+            target = child;
+            while (tlvdb_elm_get_next(target)) {
+                target = tlvdb_elm_get_next(target);
+            }
+        }
+    }
+    return (struct tlv *)tlvdb_get_tlv(target);
+}
+
+static void append_oda_bytes(uint8_t *list, size_t *list_len, size_t max_len, const uint8_t *data, size_t data_len) {
+    if (!data || !data_len || !list || !list_len || *list_len + data_len > max_len) {
+        return;
+    }
+    memcpy(list + *list_len, data, data_len);
+    *list_len += data_len;
+}
+
+static void rebuild_oda_list_from_records(emv_term_ctx_t *ctx, json_t *doc) {
+    if (!ctx || tlvdb_get(ctx->card, 0x21, NULL)) {
+        return;
+    }
+
+    json_t *records = json_path_get(doc, "$.Application.Records");
+    if (!json_is_array(records)) {
+        return;
+    }
+
+    uint8_t oda_list[4096] = {0};
+    size_t oda_list_len = 0;
+
+    size_t n = json_array_size(records);
+    for (size_t i = 0; i < n; i++) {
+        json_t *rec = json_array_get(records, i);
+        if (!json_is_object(rec)) {
+            continue;
+        }
+
+        json_t *joffline = json_object_get(rec, "Offline");
+        if (!json_is_string(joffline)) {
+            continue;
+        }
+        uint8_t offline_cnt = 0;
+        int buflen = 0;
+        if (param_gethex_to_eol(json_string_value(joffline), 0, &offline_cnt, 1, &buflen) || buflen != 1) {
+            continue;
+        }
+        if (offline_cnt == 0) {
+            continue;
+        }
+
+        uint8_t sfi = 0;
+        json_t *jsfi = json_object_get(rec, "SFI");
+        if (json_is_string(jsfi)) {
+            param_gethex_to_eol(json_string_value(jsfi), 0, &sfi, 1, &buflen);
+        }
+
+        json_t *data = json_path_get(rec, "$.Data");
+        struct tlvdb *parsed = json_tlv_to_tlvdb(data);
+        if (!parsed) {
+            continue;
+        }
+
+        struct tlv *encode_tlv = encode_target_tlv(parsed, sfi);
+        if (!encode_tlv) {
+            tlvdb_free(parsed);
+            continue;
+        }
+
+        size_t enc_len = 0;
+        unsigned char *enc = tlv_encode(encode_tlv, &enc_len);
+        if (enc && enc_len) {
+            append_oda_bytes(oda_list, &oda_list_len, sizeof(oda_list), enc, enc_len);
+        }
+        free(enc);
+        tlvdb_free(parsed);
+    }
+
+    if (oda_list_len) {
+        ctx->oda_list_len = oda_list_len;
+        memcpy(ctx->oda_list, oda_list, oda_list_len);
+        struct tlvdb *oda = tlvdb_fixed(0x21, oda_list_len, ctx->oda_list);
+        tlvdb_add(ctx->card, oda);
+        PrintAndLogEx(INFO, "Rebuilt ODA input list from scan records (%zu bytes)", oda_list_len);
+    }
+}
+
 static void load_records(struct tlvdb *root, json_t *doc) {
     json_t *records = json_path_get(doc, "$.Application.Records");
     if (!json_is_array(records)) {
@@ -148,6 +240,7 @@ int emv_term_load_from_scan(emv_term_ctx_t *ctx, const char *path) {
     merge_tlv_json_path(ctx->card, root, "$.Application.GPO");
     load_application_data(ctx->card, root);
     load_records(ctx->card, root);
+    rebuild_oda_list_from_records(ctx, root);
 
     json_decref(root);
 
