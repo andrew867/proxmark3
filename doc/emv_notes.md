@@ -126,25 +126,43 @@ All main commands are parts of EMV specification. Commands than not described th
 ### EMV terminal emulator (`emv terminal`)
 ^[Top](#top)
 
-Client-side terminal phase engine in `client/src/emv/terminal/`. Full planning docs: [docs/emv-terminal-emulator/README.md](../docs/emv-terminal-emulator/README.md).
+> **FOR RESEARCH AND LAB USE ONLY — NO WARRANTY — PROVIDED AS-IS.**  
+> Not a certified payment terminal. Authorized EMV test cards only.  
+> Docs: [docs/emv-terminal-emulator/README.md](../docs/emv-terminal-emulator/README.md) · [OPERATOR-GUIDE.md](../docs/emv-terminal-emulator/OPERATOR-GUIDE.md) · [SPEC-security-privacy.md](../docs/emv-terminal-emulator/SPEC-security-privacy.md)
+
+Client-side terminal phase engine in `client/src/emv/terminal/`.
 
 ```
-terminal run       Full phase loop: init → ODA → restrict → CVM → TRM → TAA → CAA → (online) → complete
-terminal step      Run one phase (init|oda|restrict|cvm|trm|taa|caa|online|complete)
-terminal online    Complete online path after ARQC (EXTERNAL AUTH + AC2)
-terminal pin       Standalone VERIFY PIN (offline plain or enciphered)
-terminal profile   Print or validate terminal profile JSON
-terminal load      Import card TLV from prior `emv scan` JSON (offline testing)
+terminal run         Full phase loop (init → … → complete)
+terminal step        Single phase
+terminal online      Complete online path after ARQC
+terminal pin         Standalone VERIFY PIN
+terminal profile     print | validate
+terminal load        Import card TLV from prior emv scan JSON
+terminal session     print | merge | export
+terminal host        listen (TCP mock acquirer) | sim
+terminal host-sim    One-shot host-sim on session (alias)
+terminal export-sim  Export emv sim card patch from session
+terminal test        --golden | --fixture <name>  (no USB)
+terminal replay      Mock APDU replay (--from-phase / --to-phase)
+terminal capabilities Device and build capability list
+terminal help        Command help
 ```
+
+Common flags on `run` / `step`: `-satj`, `-o session.json`, `--profile auto`, `--host-sim`, `--mock-apdu-file`, `--pcap-out`, `--timing-report`, `--exception-file`, `--no-redact`.
 
 Example:
 
 ```
-emv terminal run -satj -o /tmp/session.json --qvsdc --pin 1234
-emv terminal run -j --auto-online --arpc <hex> --arpc-rc 8840
-emv terminal online --session /tmp/session.json --arpc <hex>
+emv terminal capabilities
+emv terminal run -satj -o /tmp/session.json --qvsdc --profile auto
+emv terminal run -j --host-sim -o /tmp/session.json
+emv terminal run --mock-apdu-file fixtures/foo/mock_apdu.json -j -o /tmp/s.json
+emv terminal replay mock_apdu.json --from-phase cvm --to-phase caa -o /tmp/s.json
+emv terminal online --session /tmp/session.json --host-sim
 emv terminal load card.json -o card_session.json
-emv terminal profile validate docs/emv-terminal-emulator/examples/emv_terminal_profile.json
+emv terminal test --golden
+emv test
 ```
 ### Useful links
 ^[Top](#top)
