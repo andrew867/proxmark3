@@ -18,12 +18,11 @@
 #include "../emvjson.h"
 #include "../dol.h"
 #include "../emv_tags.h"
+#include "../emvcore.h"
 #include "cmdsmartcard.h"
 #include "cmdparser.h"
 #include "proxmark3.h"
 #include "ui.h"
-#include "iso7816/iso7816core.h"
-#include "comms.h"
 #include <string.h>
 
 #define EMVAC_AC_MASK  0xC0
@@ -102,22 +101,9 @@ static int emv_transaction_prepare_reader(emv_term_ctx_t *ctx) {
         return PM3_SUCCESS;
     }
 
-    if (GetISODEPState() == ISODEP_INACTIVE) {
-        ctx->opts.activate_field = true;
-    }
-
-    if (!ctx->opts.activate_field) {
-        return PM3_SUCCESS;
-    }
-
-    DropFieldEx(ctx->channel);
-
-    PrintAndLogEx(INFO, "Activating HF field — present card to antenna...");
-    int res = Iso7816Connect(ctx->channel);
-    if (res != PM3_SUCCESS) {
-        PrintAndLogEx(WARNING, "No contactless card detected. Hold the card on the antenna and retry.");
-        PrintAndLogEx(HINT, "Hint: verify with `hf 14a reader` or `emv search -s`");
-        return PM3_ERFTRANS;
+    int res = EMVPrepareContactless(ctx->channel, ctx->opts.activate_field);
+    if (res) {
+        return res;
     }
 
     // Card is selected; avoid re-dropping the field on every subsequent APDU.

@@ -431,6 +431,12 @@ static int CmdEMVTerminalOnline(const char *Cmd) {
         return PM3_EINVARG;
     }
 
+    int prep = EMVPrepareContactless(opts.channel, false);
+    if (prep) {
+        emv_term_ctx_free(&term_ctx);
+        return prep;
+    }
+
     SetAPDULogging(show_apdu);
     res = phase_online_run(&term_ctx);
     if (res == PM3_SUCCESS) {
@@ -508,6 +514,13 @@ static int CmdEMVTerminalPin(const char *Cmd) {
 
     if (session && session[0]) {
         emv_term_session_load_json(&term_ctx, session);
+    }
+
+    int prep = EMVPrepareContactless(opts.channel, false);
+    if (prep) {
+        emv_term_secure_zero(prompt_pin, sizeof(prompt_pin));
+        emv_term_ctx_free(&term_ctx);
+        return prep;
     }
 
     SetAPDULogging(show_apdu);
