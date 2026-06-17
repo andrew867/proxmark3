@@ -494,6 +494,15 @@ int EMVSearch(Iso7816CommandChannel channel, bool ActivateField, bool LeaveField
         int res = EMVSelect(channel, (i == 0) ? ActivateField : false, true, aidbuf, aidlen, data, sizeof(data), &datalen, &sw, tlv);
         // retry if error and not returned sw error
         if (res && res != 5) {
+            if (res == PM3_EIO) {
+                if (verbose) {
+                    PrintAndLogEx(WARNING, "HF field inactive — activate field and present a card before searching");
+                }
+                if (LeaveFieldON == false) {
+                    DropFieldEx(channel);
+                }
+                return 1;
+            }
             if (++retrycnt < 3) {
                 i--;
             } else {

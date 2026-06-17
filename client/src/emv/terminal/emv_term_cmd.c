@@ -148,7 +148,8 @@ static int CmdEMVTerminalRun(const char *Cmd) {
                   "emv terminal run -j --pin 1234 -o /tmp/session.json --qvsdc\n"
                   "emv terminal run -j --auto-online --host-sim --profile auto\n"
                   "emv terminal run --mock-apdu-file fixtures/foo/mock_apdu.json\n"
-                  "emv terminal run -j --trace-phases --stop-after taa\n");
+                  "emv terminal run -j --trace-phases --stop-after taa\n"
+                  "\nContactless: HF field is activated automatically at transaction start.");
 
     void *argtable[] = {
         arg_param_begin,
