@@ -8,6 +8,7 @@
 #include "phase_caa.h"
 #include "phase_scripts.h"
 #include "emv_term_host.h"
+#include "emv_term_host_tcp.h"
 #include "emv_term_tvr.h"
 #include "../emvcore.h"
 #include "ui.h"
@@ -57,6 +58,26 @@ static int build_issuer_auth(emv_term_ctx_t *ctx) {
         } else if (GetCardPSVendor(ctx->aid, ctx->aid_len) == CV_INTERAC) {
             tag91[tag91_len++] = 0x88;
             tag91[tag91_len++] = 0x40;
+        }
+    } else if (ctx->opts.host_tcp && ctx->opts.host_tcp[0]) {
+        emv_term_host_keys_t keys;
+        int hres = emv_term_host_keys_default(&keys, ctx);
+        if (hres) {
+            return hres;
+        }
+        emv_term_host_tcp_resp_t tcp_resp;
+        PrintAndLogEx(INFO, "* Online processing (TCP host %s)", ctx->opts.host_tcp);
+        if (emv_term_host_tcp_request(ctx, ctx->opts.host_tcp, &keys, &tcp_resp) != PM3_SUCCESS) {
+            return PM3_ESOFT;
+        }
+        ctx->host_tcp_applied = true;
+        if (parse_hex_field(tcp_resp.arpc, tag91, &tag91_len, sizeof(tag91)) != PM3_SUCCESS) {
+            return PM3_ESOFT;
+        }
+        if (tcp_resp.arpc_rc[0]) {
+            size_t rc_len = 0;
+            parse_hex_field(tcp_resp.arpc_rc, tag91 + tag91_len, &rc_len, sizeof(tag91) - tag91_len);
+            tag91_len += rc_len;
         }
     } else if (ctx->opts.host_sim || ctx->host_keys_path[0]) {
         emv_term_host_keys_t keys;

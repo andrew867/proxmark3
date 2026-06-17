@@ -5,6 +5,7 @@
 //-----------------------------------------------------------------------------
 
 #include "emv_term_mock.h"
+#include "emv_term_pcap.h"
 #include "ui.h"
 #include "util.h"
 #include "commonutil.h"
@@ -163,6 +164,7 @@ int emv_term_mock_exchange(Iso7816CommandChannel channel, bool activate_field, b
     *sw = m->sw;
 
     PrintAndLogEx(INFO, "Mock step %zu/%zu: %s SW=%04x", g_step_idx + 1, g_step_count, m->name, m->sw);
+    emv_term_pcap_record(capdu, capdu_len, m->rapdu, m->rapdu_len, m->sw);
     g_step_idx++;
     return PM3_SUCCESS;
 }

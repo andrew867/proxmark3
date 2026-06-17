@@ -51,6 +51,7 @@ typedef struct {
     int result;
     uint16_t sw;
     uint64_t ts_ms;
+    uint32_t duration_ms;
     char note[128];
 } emv_phase_event_t;
 
@@ -85,6 +86,12 @@ typedef struct {
     const char *capk_extra;
     bool no_redact;
     bool full_tlv;
+    const char *export_sim;
+    const char *host_tcp;
+    const char *pcap_out;
+    const char *pcap_meta;
+    bool timing_report;
+    bool skip_banner;
 } emv_term_cli_opts_t;
 
 typedef struct emv_term_ctx {
@@ -137,6 +144,11 @@ typedef struct emv_term_ctx {
     uint8_t online_pin_block[16];
     size_t online_pin_block_len;
     struct emv_term_exception_file *exception_file;
+    char atr_hex[128];
+    size_t atr_len;
+    char host_tcp_arpc[128];
+    char host_tcp_arpc_rc[16];
+    bool host_tcp_applied;
 } emv_term_ctx_t;
 
 const char *emv_term_phase_name(emv_term_phase_t phase);
@@ -147,6 +159,8 @@ void emv_term_ctx_free(emv_term_ctx_t *ctx);
 int emv_term_cli_setup(emv_term_ctx_t *ctx);
 
 int emv_term_event_add(emv_term_ctx_t *ctx, emv_term_phase_t phase, int result, uint16_t sw, const char *note);
+int emv_term_event_add_timed(emv_term_ctx_t *ctx, emv_term_phase_t phase, int result, uint16_t sw,
+                             const char *note, uint32_t duration_ms);
 
 struct tlvdb *emv_term_get_root(emv_term_ctx_t *ctx);
 

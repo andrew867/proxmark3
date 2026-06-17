@@ -23,8 +23,12 @@
 #include "emv_term_session.h"
 #include "emv_term_scheme.h"
 #include "emv_term_mock.h"
+#include "emv_term_sim_export.h"
+#include "emv_term_timing.h"
+#include "emv_term_pcap.h"
 #include "comms.h"
 #include "ui.h"
+#include "util_posix.h"
 #include <string.h>
 
 static bool stop_after_phase(const emv_term_ctx_t *ctx, emv_term_phase_t phase) {
@@ -47,6 +51,9 @@ static bool should_run_online(const emv_term_ctx_t *ctx) {
     if (ctx->opts.host_keys && ctx->opts.host_keys[0]) {
         return true;
     }
+    if (ctx->opts.host_tcp && ctx->opts.host_tcp[0]) {
+        return true;
+    }
     if (ctx->opts.arc && ctx->opts.arc[0]) {
         return true;
     }
@@ -65,6 +72,11 @@ int emv_terminal_step(emv_term_ctx_t *ctx, emv_term_phase_t phase) {
     uint16_t sw = 0;
 
     ctx->current_phase = phase;
+
+    uint64_t t0 = 0;
+    if (ctx->opts.timing_report) {
+        t0 = msclock();
+    }
 
     switch (phase) {
         case EMV_PHASE_INIT:
@@ -99,7 +111,16 @@ int emv_terminal_step(emv_term_ctx_t *ctx, emv_term_phase_t phase) {
             return PM3_EINVARG;
     }
 
-    emv_term_event_add(ctx, phase, res, sw, NULL);
+    uint32_t duration_ms = 0;
+    if (ctx->opts.timing_report) {
+        duration_ms = (uint32_t)(msclock() - t0);
+    }
+
+    if (ctx->opts.timing_report) {
+        emv_term_event_add_timed(ctx, phase, res, sw, NULL, duration_ms);
+    } else {
+        emv_term_event_add(ctx, phase, res, sw, NULL);
+    }
     return res;
 }
 
@@ -193,6 +214,19 @@ finish:
     }
     if (outpath && outpath[0]) {
         emv_term_session_save_json(ctx, outpath);
+        if (ctx->opts.pcap_meta && ctx->opts.pcap_meta[0]) {
+            emv_term_pcap_write_meta(ctx->opts.pcap_out, ctx->opts.pcap_meta);
+        } else if (ctx->opts.pcap_out && ctx->opts.pcap_out[0]) {
+            emv_term_pcap_write_meta(ctx->opts.pcap_out, outpath);
+        }
+    }
+
+    if (ctx->opts.timing_report) {
+        emv_term_timing_print_summary(ctx);
+    }
+
+    if (ctx->opts.export_sim && ctx->opts.export_sim[0]) {
+        emv_term_sim_export_ctx(ctx, ctx->opts.export_sim);
     }
 
     DropFieldEx(ctx->channel);

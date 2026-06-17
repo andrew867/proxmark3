@@ -83,6 +83,9 @@ int emv_term_session_save_json(const emv_term_ctx_t *ctx, const char *path) {
     if (ctx->scheme_name[0]) {
         JsonSaveStr(terminal, "Scheme", ctx->scheme_name);
     }
+    if (ctx->atr_len) {
+        JsonSaveStr(terminal, "ATR", ctx->atr_hex);
+    }
     json_object_set_new(root, "Terminal", terminal);
 
     JsonSaveStr(root, "Outcome", emv_term_outcome_str(ctx->outcome));
@@ -96,6 +99,9 @@ int emv_term_session_save_json(const emv_term_ctx_t *ctx, const char *path) {
         JsonSaveHex(pe, "sw", ctx->events[i].sw, 2);
         if (ctx->events[i].note[0]) {
             JsonSaveStr(pe, "notes", ctx->events[i].note);
+        }
+        if (ctx->opts.timing_report || ctx->events[i].duration_ms) {
+            JsonSaveInt(pe, "duration_ms", ctx->events[i].duration_ms);
         }
         json_array_append_new(phases, pe);
     }
@@ -233,7 +239,13 @@ int emv_term_session_load_json(emv_term_ctx_t *ctx, const char *path) {
                 }
             }
             const char *note = json_is_string(jnote) ? json_string_value(jnote) : NULL;
-            emv_term_event_add(ctx, phase, result, sw, note);
+            json_t *jdur = json_object_get(pe, "duration_ms");
+            uint32_t dur = json_is_integer(jdur) ? (uint32_t)json_integer_value(jdur) : 0;
+            if (dur) {
+                emv_term_event_add_timed(ctx, phase, result, sw, note, dur);
+            } else {
+                emv_term_event_add(ctx, phase, result, sw, note);
+            }
         }
     }
 

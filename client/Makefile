@@ -862,6 +862,15 @@ SRCS =  mifare/aiddesfire.c \
         emv/terminal/emv_term_redact.c \
         emv/terminal/emv_term_session_view.c \
         emv/terminal/phase_scripts.c \
+        emv/terminal/emv_term_sim_export.c \
+        emv/terminal/emv_term_host_tcp.c \
+        emv/terminal/emv_term_lua.c \
+        emv/terminal/emv_term_reader_session.c \
+        emv/terminal/emv_term_banner.c \
+        emv/terminal/emv_term_pcap.c \
+        emv/terminal/emv_term_replay.c \
+        emv/terminal/emv_term_timing.c \
+        emv/terminal/emv_term_capabilities.c \
         emv/test/crypto_test.c\
         emv/test/cryptotest.c\
         emv/test/cda_test.c\
@@ -869,6 +878,9 @@ SRCS =  mifare/aiddesfire.c \
         emv/test/terminal_host_test.c\
         emv/test/terminal_cvm_test.c\
         emv/test/terminal_exception_test.c\
+        emv/test/terminal_sim_export_test.c\
+        emv/test/terminal_pcap_test.c\
+        emv/test/terminal_replay_test.c\
         emv/test/dda_test.c\
         emv/test/sda_test.c\
         fido/additional_ca.c \
