@@ -25,6 +25,10 @@
 #include "emv_term_redact.h"
 #include "emv_term_sim_export.h"
 #include "emv_term_host_tcp.h"
+#include "emv_term_banner.h"
+#include "emv_term_replay.h"
+#include "emv_term_capabilities.h"
+#include "emv_term_pcap.h"
 #include "phase_cvm.h"
 #include "phase_online.h"
 #include "phase_complete.h"
@@ -50,6 +54,19 @@ static void apply_wave_b_opts(emv_term_cli_opts_t *opts,
     }
     opts->no_redact = no_redact;
     opts->full_tlv = full_tlv;
+}
+
+static void apply_wave_d_opts(emv_term_cli_opts_t *opts,
+                              const char *pcap_out,
+                              const char *pcap_meta,
+                              bool timing_report) {
+    if (pcap_out && pcap_out[0]) {
+        opts->pcap_out = pcap_out;
+    }
+    if (pcap_meta && pcap_meta[0]) {
+        opts->pcap_meta = pcap_meta;
+    }
+    opts->timing_report = timing_report;
 }
 
 static int CmdEMVTerminalSession(const char *Cmd);
@@ -167,6 +184,9 @@ static int CmdEMVTerminalRun(const char *Cmd) {
         arg_lit0(NULL, "full-tlv", "Embed Card.TLV snapshot in session JSON"),
         arg_str0(NULL, "export-sim", "<file>", "Export emv sim patch JSON after completion"),
         arg_str0(NULL, "host-tcp", "<host:port>", "TCP mock acquirer (e.g. 127.0.0.1:8583)"),
+        arg_str0(NULL, "pcap-out", "<file.pcap>", "Export ISO7816 APDU trace (Wireshark linktype 265)"),
+        arg_str0(NULL, "pcap-meta", "<session.json>", "Companion session JSON for pcap correlation"),
+        arg_lit0(NULL, "timing-report", "Record phase duration_ms in session JSON"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);
@@ -196,6 +216,10 @@ static int CmdEMVTerminalRun(const char *Cmd) {
                       arg_get_lit(ctx, 30));
     opts.export_sim = arg_get_str(ctx, 31)->sval[0];
     opts.host_tcp = arg_get_str(ctx, 32)->sval[0];
+    apply_wave_d_opts(&opts,
+                      arg_get_str(ctx, 33)->sval[0],
+                      arg_get_str(ctx, 34)->sval[0],
+                      arg_get_lit(ctx, 35));
     opts.use_terminal_profile = opts.param_load_json;
     CLIParserFree(ctx);
 
@@ -203,7 +227,10 @@ static int CmdEMVTerminalRun(const char *Cmd) {
 
     if (opts.mock_apdu && opts.mock_apdu[0]) {
         opts.activate_field = false;
+        opts.skip_banner = true;
     }
+
+    emv_term_banner_maybe_show(opts.skip_banner);
 
     if (IfPm3Smartcard() == false && opts.channel == CC_CONTACT && !(opts.mock_apdu && opts.mock_apdu[0])) {
         PrintAndLogEx(WARNING, "PM3 does not have SMARTCARD support. Exiting.");
@@ -267,6 +294,8 @@ static int CmdEMVTerminalStep(const char *Cmd) {
         arg_str0(NULL, "capk-extra", "<file>", "Extra CAPK file"),
         arg_lit0(NULL, "no-redact", "Session export without redaction"),
         arg_lit0(NULL, "full-tlv", "Embed Card.TLV in session JSON"),
+        arg_str0(NULL, "pcap-out", "<file.pcap>", "Export ISO7816 APDU trace"),
+        arg_lit0(NULL, "timing-report", "Record phase duration_ms"),
         arg_param_end
     };
     CLIExecWithReturn(ctx, Cmd, argtable, true);
@@ -292,9 +321,14 @@ static int CmdEMVTerminalStep(const char *Cmd) {
                       arg_get_str(ctx, 20)->sval[0],
                       arg_get_lit(ctx, 21),
                       arg_get_lit(ctx, 22));
+    apply_wave_d_opts(&opts,
+                      arg_get_str(ctx, 23)->sval[0],
+                      NULL,
+                      arg_get_lit(ctx, 24));
     CLIParserFree(ctx);
 
     print_channel(opts.channel);
+    emv_term_banner_maybe_show(false);
 
     emv_term_ctx_t term_ctx;
     int res = emv_term_ctx_init(&term_ctx, &opts);
@@ -375,6 +409,7 @@ static int CmdEMVTerminalOnline(const char *Cmd) {
     opts.arpc_rc = arpc_rc;
 
     print_channel(opts.channel);
+    emv_term_banner_maybe_show(false);
 
     if (IfPm3Smartcard() == false && opts.channel == CC_CONTACT) {
         PrintAndLogEx(WARNING, "PM3 does not have SMARTCARD support. Exiting.");
@@ -595,6 +630,8 @@ static int CmdEMVTerminalHostSim(const char *Cmd) {
     opts.host_sim = true;
     opts.continue_on_bad_arqc = cont_bad;
 
+    emv_term_banner_maybe_show(false);
+
     emv_term_ctx_t term_ctx;
     int res = emv_term_ctx_init(&term_ctx, &opts);
     if (res) {
@@ -785,6 +822,77 @@ static int CmdEMVTerminalHost(const char *Cmd) {
     return CmdsParse(HostCommandTable, Cmd);
 }
 
+static int CmdEMVTerminalReplay(const char *Cmd) {
+    CLIParserContext *ctx;
+    CLIParserInit(&ctx, "emv terminal replay",
+                  "Replay mock APDU trace through phase engine (no live card)",
+                  "emv terminal replay mock_apdu.json\n"
+                  "emv terminal replay mock_apdu.json --from-phase cvm --to-phase caa -o s.json\n"
+                  "emv terminal replay mock_apdu.json --host-sim --profile auto\n");
+
+    void *argtable[] = {
+        arg_param_begin,
+        arg_str1(NULL, NULL, "<mock_apdu.json>", "Mock APDU trace JSON"),
+        arg_str0(NULL, "from-phase", "<name>", "Start phase (init|oda|...|complete)"),
+        arg_str0(NULL, "to-phase", "<name>", "End phase (default: complete)"),
+        arg_str0("o", "output", "<file>", "Session JSON output path"),
+        arg_str0(NULL, "profile", "<name>", "Scheme profile (auto|interac|visa|mc)"),
+        arg_str0(NULL, "session", "<file>", "Session JSON for mid-flow state"),
+        arg_lit0(NULL, "host-sim", "Run online phase with host simulator"),
+        arg_str0(NULL, "host-keys", "<file>", "Host simulator keys JSON"),
+        arg_str0(NULL, "pcap-out", "<file.pcap>", "Export ISO7816 APDU trace"),
+        arg_str0(NULL, "pcap-meta", "<session.json>", "Companion session JSON for pcap"),
+        arg_lit0(NULL, "timing-report", "Record phase duration_ms"),
+        arg_lit0("j", "jload", "Load terminal profile"),
+        arg_lit0(NULL, "trace-phases", "Log phase boundaries"),
+        arg_param_end
+    };
+    CLIExecWithReturn(ctx, Cmd, argtable, true);
+
+    emv_term_cli_opts_t opts = {0};
+    opts.mock_apdu = arg_get_str(ctx, 1)->sval[0];
+    const char *from_phase = arg_get_str(ctx, 2)->sval[0];
+    const char *to_phase = arg_get_str(ctx, 3)->sval[0];
+    opts.output_session = arg_get_str(ctx, 4)->sval[0];
+    apply_profile_arg(&opts, arg_get_str(ctx, 5)->sval[0]);
+    opts.session_path = arg_get_str(ctx, 6)->sval[0];
+    opts.host_sim = arg_get_lit(ctx, 7);
+    opts.host_keys = arg_get_str(ctx, 8)->sval[0];
+    apply_wave_d_opts(&opts,
+                      arg_get_str(ctx, 9)->sval[0],
+                      arg_get_str(ctx, 10)->sval[0],
+                      arg_get_lit(ctx, 11));
+    opts.param_load_json = arg_get_lit(ctx, 12);
+    opts.use_terminal_profile = opts.param_load_json;
+    opts.trace_phases = arg_get_lit(ctx, 13);
+    opts.skip_banner = true;
+    opts.auto_online = opts.host_sim;
+    CLIParserFree(ctx);
+
+    emv_term_ctx_t term_ctx;
+    int res = emv_term_ctx_init(&term_ctx, &opts);
+    if (res) {
+        return res;
+    }
+
+    res = emv_term_cli_setup(&term_ctx);
+    if (res) {
+        emv_term_ctx_free(&term_ctx);
+        emv_term_mock_clear();
+        return res;
+    }
+
+    res = emv_term_replay_run(&term_ctx, from_phase, to_phase);
+    emv_term_mock_clear();
+    emv_term_ctx_free(&term_ctx);
+    return res;
+}
+
+static int CmdEMVTerminalCapabilities(const char *Cmd) {
+    (void)Cmd;
+    return emv_term_capabilities_print();
+}
+
 static int CmdEMVTerminalExportSim(const char *Cmd) {
     CLIParserContext *ctx;
     CLIParserInit(&ctx, "emv terminal export-sim",
@@ -834,6 +942,8 @@ static command_t TerminalCommandTable[] = {
     {"host",    CmdEMVTerminalHost,   AlwaysAvailable, "Host simulator (TCP listen / one-shot)"},
     {"host-sim", CmdEMVTerminalHostSim, IfPm3Iso14443, "Host simulator online completion (alias)"},
     {"test",    CmdEMVTerminalTest,   AlwaysAvailable, "Golden regression fixtures (no USB)"},
+    {"replay",  CmdEMVTerminalReplay, AlwaysAvailable, "Replay mock APDU trace through phases"},
+    {"capabilities", CmdEMVTerminalCapabilities, AlwaysAvailable, "Device / build capability list"},
     {"session", CmdEMVTerminalSession, AlwaysAvailable, "Session print / merge / export"},
     {NULL, NULL, NULL, NULL}
 };
