@@ -23,6 +23,8 @@
 #include "cmdparser.h"
 #include "cmdsmartcard.h" // ExchangeAPDUSC
 #include "ui.h"
+#include "emv/terminal/emv_term_mock.h"
+#include "emv/terminal/emv_term_pcap.h"
 #include "cmdhf14a.h"
 #include "cmdhf14b.h"
 #include "iso14b.h"      // iso14b_raw_cmd_t
@@ -44,11 +46,10 @@ static isodep_state_t isodep_state = ISODEP_INACTIVE;
 void SetISODEPState(isodep_state_t state) {
     isodep_state = state;
     if (APDULogging) {
-        PrintAndLogEx(SUCCESS, "Setting ISODEP -> %s%s%s%s%s"
+        PrintAndLogEx(SUCCESS, "Setting ISODEP -> %s%s%s%s"
                       , isodep_state == ISODEP_INACTIVE ? "inactive" : ""
                       , isodep_state == ISODEP_NFCA ? _GREEN_("NFC-A") : ""
                       , isodep_state == ISODEP_NFCB ? _GREEN_("NFC-B") : ""
-                      , isodep_state == ISODEP_NFCB_PRIME ? _GREEN_("NFC-B'") : ""
                       , isodep_state == ISODEP_NFCV ? _GREEN_("NFC-V") : ""
                      );
     }
@@ -89,6 +90,11 @@ int Iso7816ExchangeEx(Iso7816CommandChannel channel, bool activate_field, bool l
         *sw = 0;
     }
 
+    if (emv_term_mock_active()) {
+        return emv_term_mock_exchange(channel, activate_field, leave_field_on, apdu, include_le,
+                                      result, max_result_len, result_len, sw);
+    }
+
     if (activate_field) {
         DropFieldEx(channel);
         msleep(50);
@@ -126,15 +132,13 @@ int Iso7816ExchangeEx(Iso7816CommandChannel channel, bool activate_field, bool l
                 case ISODEP_NFCB:
                     res = exchange_14b_apdu(data, datalen, activate_field, leave_field_on, result, (int)max_result_len, (int *)result_len, 4000);
                     break;
-                case ISODEP_NFCB_PRIME:
-                    res = exchange_14b_prime_apdu(data, datalen, activate_field, leave_field_on, result, (int)max_result_len, (int *)result_len, 4000);
-                    break;
                 case ISODEP_NFCV:
                     PrintAndLogEx(INFO, " To be implemented, feel free to contribute!");
                     break;
                 case ISODEP_INACTIVE:
                     if (activate_field == false) {
                         PrintAndLogEx(FAILED, "Field currently inactive, cannot send an APDU");
+                        PrintAndLogEx(HINT, "Hint: use `emv terminal run -s` or `emv search -s` to activate the HF field first");
                         return PM3_EIO;
                     }
                     res = ExchangeAPDU14a(data, datalen, activate_field, leave_field_on, result, (int)max_result_len, (int *)result_len);
@@ -184,10 +188,12 @@ int Iso7816ExchangeEx(Iso7816CommandChannel channel, bool activate_field, bool l
                 PrintAndLogEx(ERR, "APDU chaining len " _RED_("%02x"), *sw & 0xFF);
             } else {
                 PrintAndLogEx(ERR, "APDU (%02x%02x) ERROR... " _RED_("%4X") " - %s", apdu.CLA, apdu.INS, isw, GetAPDUCodeDescription(*sw >> 8, *sw & 0xFF));
+                emv_term_pcap_record(data, (size_t)datalen, result, *result_len, isw);
                 return 5;
             }
         }
     }
+    emv_term_pcap_record(data, (size_t)datalen, result, *result_len, isw);
     return PM3_SUCCESS;
 }
 
