@@ -16,6 +16,7 @@
 // Some lua scripting glue to proxmark core.
 //-----------------------------------------------------------------------------
 #include "scripting.h"
+#include "emv/terminal/emv_term_lua.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -1286,9 +1287,6 @@ static int l_set_iso_dep_state(lua_State *L) {
         case 3:
             SetISODEPState(ISODEP_NFCV);
             break;
-        case 4:
-            SetISODEPState(ISODEP_NFCB_PRIME);
-            break;
         default:
             return returnToLuaWithError(L, "Wrong ISODEP STATE value");
     }
@@ -1464,6 +1462,8 @@ int set_pm3_libraries(lua_State *L) {
 
     // print redirect here
     lua_register(L, "print", l_printandlogex);
+
+    emv_term_lua_register(L);
 
     // add to the LUA_PATH (package.path in lua)
     // so we can load scripts from various places:
