@@ -3,8 +3,7 @@ All notable changes to this project will be documented in this file.
 This project uses the changelog in accordance with [keepchangelog](http://keepachangelog.com/). Please use this to write notable changes, which is not the same as git commit log...
 
 ## [unreleased][unreleased]
-- Added EMV terminal emulator planning documentation under `doc/planning/emv-terminal-emulator/` (lab/research use only; not a certified payment terminal).
-- Add support for Innovatron protocol detection to `hf 14b info` (@kormax)
+- Added `emv terminal` — EMV payment **terminal emulator** for lab/research use (contactless + contact paths): full phase engine (`run`/`step`), host simulator (ARQC/ARPC), scheme profiles (`--profile auto|interac|visa|mc`), golden CI fixtures (`emv terminal test --golden`), session export/redaction, mock APDU replay, TCP mock acquirer, Lua bindings, PCAP trace export, legal-use banner, and **`emv terminal crypto`** playground with human-readable card digest (`--summary`), quick AFL, PPSE AID fallback, and export compare. **Not a certified payment terminal — no warranty — authorized test cards only.** Planning docs: `doc/planning/emv-terminal-emulator/` (see OPERATOR-GUIDE.md and SPEC-security-privacy.md).
 - Improved `lf cotag reader` and `lf cotag demod`: Reimplementation and enhancement of proxmark3 COTAG support
 - Added `hf felica sim` command (@kormax)
 - Added `mad read`, `mad write`, `mad verify`, `mad decode`, `mad encode` commands with typed struct MAD API (@AlxCzl)
