@@ -147,3 +147,5 @@ _codeql*
 venv/
 #Claude AI files
 CLAUDE.md
+!client/src/emv/test/fixtures/
+!client/src/emv/test/fixtures/**/*.json
