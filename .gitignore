@@ -68,6 +68,16 @@ cov-int/
 !client/resources/felica/*.json
 !client/resources/calypso/
 !client/resources/calypso/*.json
+# EMV terminal lab resources (tracked JSON)
+!client/resources/emv_terminal_profile.json
+!client/resources/emv_terminal_profile_interac.json
+!client/resources/host_sim_interac.json
+!client/resources/interac_test_keys.json
+!client/resources/terminal_aid_candidates.json
+!client/resources/exception_file_sample.txt
+!client/resources/scheme_profiles/
+!client/resources/scheme_profiles/*.json
+!client/resources/README-emv-terminal.md
 client/src/ui/ui_image.h
 client/src/ui/ui_overlays.h
 client/deps/reveng/bmptst
