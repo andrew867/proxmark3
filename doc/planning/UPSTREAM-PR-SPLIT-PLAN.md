@@ -58,7 +58,7 @@ graph LR
 | # | Title (suggested) | Build impact | Reviewer focus |
 |---|-------------------|--------------|----------------|
 | **1** | `docs(emv): terminal operator guide and usage notes` | None (markdown only) | **How to use**, legal disclaimer, RDV4 3.3 V — not implementation plans |
-| **2** | `chore(emv): terminal profiles, scheme JSON, golden fixtures` | None (data + `.gitignore`) | Public test keys only, no real PANs |
+| **2** | `chore(emv): user-facing terminal profiles and scheme resources` | None (data + short resource README) | Operator runtime JSON + public lab keys only |
 | **3a** | `feat(emv): terminal emulator phase engine and offline unit tests` | Phase pipeline, session/profile, mock; `make client` + `emv test` (taa/cvm/exception) | ISO EMV offline logic |
 | **3b** | `feat(emv): host simulator, golden runner, crypto playground core` | Orchestrator, online phase, host/TCP, crypto lab internals, Lua, remaining self-tests | Host sim + crypto internals |
 | **4** | `feat(emv): terminal CLI and CI fixes` | `emv terminal` tree, `pm3_tests.sh`, workflows, CodeQL | User-facing commands + CI |
@@ -68,7 +68,8 @@ Map to buckets:
 | Bucket | Upstream PR |
 |--------|-------------|
 | **How-to-use / operator docs** | **PR 1** (`OPERATOR-GUIDE.md`, `emv_notes` terminal section) |
-| Resources / fixtures JSON | **PR 2** |
+| Runtime profile / scheme JSON (operators) | **PR 2** |
+| Golden/unit fixture JSON (tests) | **PR 3a** |
 | Phase engine + offline phases | **PR 3a** |
 | Host sim, golden, crypto internals, orchestrator | **PR 3b** |
 | CLI + CI | **PR 4** |
@@ -103,9 +104,9 @@ README.md / CHANGELOG.md                       # one-line links
 
 ---
 
-## PR 2 — Resources & fixtures
+## PR 2 — User-facing runtime resources only
 
-**Branch:** `upstream-pr/2-emv-terminal-resources`
+**Branch:** `cursor/upstream-pr-2-resources-e836`
 
 ### Include
 
@@ -116,9 +117,14 @@ client/resources/interac_test_keys.json
 client/resources/terminal_aid_candidates.json
 client/resources/exception_file_sample.txt
 client/resources/scheme_profiles/**
-client/src/emv/test/fixtures/**
-.gitignore
+client/resources/README-emv-terminal.md   # operator table of JSON files
+.gitignore                              # minimal allowlist for tracked JSON only
 ```
+
+### Exclude
+
+- `client/src/emv/test/fixtures/**` (golden/unit JSON lands in **PR 3a**, no README/templates)
+- Internal planning notes, `.template` dev files, CodeQL/docs fork noise
 
 No `.c` / `.h` changes.
 
@@ -249,21 +255,22 @@ Document in PR 4 body so security reviewers know this is intentional interop cod
 
 ---
 
-## Opening PRs to RfidResearchGroup/proxmark3
+## Fork-only review stack (andrew867/proxmark3)
+
+Regenerate branches, push, and review **on the fork** before any upstream retry:
 
 ```bash
-git push -u origin upstream-pr/1-docs-emv-planning
-git push -u origin upstream-pr/2-emv-terminal-resources
-git push -u origin upstream-pr/3a-emv-terminal-phases
-git push -u origin upstream-pr/3b-emv-terminal-host-crypto
-git push -u origin upstream-pr/4-emv-terminal-cli
-
-# Cross-fork PRs (draft), all target RRG master; merge in order 1 → 2 → 3a → 3b → 4
-gh pr create --repo RfidResearchGroup/proxmark3 \
-  --head andrew867:upstream-pr/1-docs-emv-planning --base master --draft ...
+./tools/create_upstream_pr_branches.sh
+git push -u origin cursor/upstream-pr-1-docs-e836 --force-with-lease
+git push -u origin cursor/upstream-pr-2-resources-e836 --force-with-lease
+git push -u origin cursor/upstream-pr-3a-phases-e836 --force-with-lease
+git push -u origin cursor/upstream-pr-3b-host-crypto-e836 --force-with-lease
+git push -u origin cursor/upstream-pr-4-cli-e836 --force-with-lease
 ```
 
-Until PR 1 merges, later PR diffs against `master` are cumulative (expected for stacked forks). Rebase downstream branches after each upstream merge.
+Draft PRs on the fork stack PR 2 → PR 1, PR 3a → PR 2, etc. Verify each diff line-by-line (no `SPEC-*`, no `IMPLEMENTATION-*`, no fixture READMEs in PR 2).
+
+**Do not** open or edit RRG upstream PRs until fork review is signed off.
 
 ---
 

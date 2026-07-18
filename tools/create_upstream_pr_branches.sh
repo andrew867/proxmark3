@@ -270,14 +270,41 @@ Also:
 ```
 """
 )
-# Drop planning-spec cross-links that are not in this PR
+# Strip internal planning-spec cross-links (not shipped in user docs PR)
 op = Path("doc/planning/emv-terminal-emulator/OPERATOR-GUIDE.md")
 text = op.read_text()
-text = text.replace(
-    "See [SPEC-security-privacy.md](./SPEC-security-privacy.md) for PIN handling, redaction, and threat model.",
-    "PIN handling: use `--pin` / `EMV_TEST_PIN` for automation; interactive prompt on TTY only. "
-    "Session export redacts PAN/crypto by default (`--no-redact` is lab-only).",
-)
+replacements = [
+    (
+        "See [SPEC-security-privacy.md](./SPEC-security-privacy.md) for PIN handling, redaction, and threat model.",
+        "PIN handling: use `--pin` / `EMV_TEST_PIN` for automation; interactive prompt on TTY only. "
+        "Session export redacts PAN/crypto by default (`--no-redact` is lab-only).",
+    ),
+    (
+        "Fixtures live in `client/src/emv/test/fixtures/`. See [fixtures README](../../client/src/emv/test/fixtures/README.md).",
+        "Fixtures live in `client/src/emv/test/fixtures/` (JSON only). Run `emv terminal test --golden` or `--fixture <name>`.",
+    ),
+    (
+        "Full CLI flags: `emv terminal help` and [SPEC-v2-cli-ux.md](./SPEC-v2-cli-ux.md).",
+        "Full CLI flags: run `emv terminal help` or see [doc/emv_notes.md](../../emv_notes.md) (`emv terminal` section).",
+    ),
+    (
+        "## Related documentation\n\n"
+        "- [README.md](./README.md) — overview and document map\n"
+        "- [SPEC-security-privacy.md](./SPEC-security-privacy.md) — security requirements\n"
+        "- [SPEC-v2-trace-replay.md](./SPEC-v2-trace-replay.md) — PCAP and replay\n"
+        "- [doc/emv_notes.md](../../doc/emv_notes.md) — all EMV commands\n"
+        "- [CHANGELOG.md](./CHANGELOG.md) — feature history\n",
+        "## Related documentation\n\n"
+        "- [README.md](./README.md) — overview\n"
+        "- [doc/emv_notes.md](../../emv_notes.md) — all EMV commands\n"
+        "- [doc/emv_pcap_format.md](../../emv_pcap_format.md) — PCAP export format\n"
+        "- Terminal profile JSON under `client/resources/` (added in PR 2)\n",
+    ),
+]
+for old, new in replacements:
+    text = text.replace(old, new)
+if "SPEC-" in text:
+    raise SystemExit("OPERATOR-GUIDE still references planning SPEC-* files")
 op.write_text(text)
 readme = Path("README.md")
 rt = readme.read_text()
@@ -304,7 +331,7 @@ How-to-use documentation for the lab EMV terminal emulator:
 operator workflows, command overview, PCAP notes, and RDV4 3.3 V
 hardware caveat. No implementation planning specs in this PR."
 
-echo "=== PR2: chore/emv-terminal-resources ==="
+echo "=== PR2: user-facing terminal resources ==="
 git checkout -B cursor/upstream-pr-2-resources-e836 cursor/upstream-pr-1-docs-e836
 git checkout "$INTEGRATED" -- \
     client/resources/emv_terminal_profile.json \
@@ -313,13 +340,68 @@ git checkout "$INTEGRATED" -- \
     client/resources/emv_terminal_profile_interac.json \
     client/resources/terminal_aid_candidates.json \
     client/resources/exception_file_sample.txt \
-    client/resources/scheme_profiles \
-    client/src/emv/test/fixtures
-git checkout "$INTEGRATED" -- .gitignore
-git commit -m "chore(emv): add terminal profiles, scheme JSON, and golden fixtures
+    client/resources/scheme_profiles
+# User-facing resource README (not internal planning notes)
+python3 <<'INNER'
+from pathlib import Path
+Path("client/resources/README-emv-terminal.md").write_text("""# EMV terminal resources (lab use)
 
-Public interoperability test keys and synthetic fixtures only.
-No C source changes."
+Runtime JSON used by `emv terminal` / `emv terminal profile` / host-sim.
+
+> Lab / research only — not for live payment networks.
+
+| File | Used by | Notes |
+|------|---------|--------|
+| `emv_terminal_profile.json` | `emv terminal … -j` / `profile validate` | Default terminal TLV defaults (amount, country, currency, TTQ, …) |
+| `emv_terminal_profile_interac.json` | `--profile interac` | Interac-oriented terminal defaults |
+| `scheme_profiles/` | `--profile auto\\|visa\\|mc\\|interac` | Per-scheme TTQ / TAC / policy hints |
+| `terminal_aid_candidates.json` | AID selection helpers | Candidate AIDs for lab testing |
+| `host_sim_interac.json` | `--host-sim` / `emv terminal host-sim` | Local host-sim config (no network) |
+| `interac_test_keys.json` | `--host-keys` | **Public** Interac Flash interoperability test pack keys — never live credentials |
+| `exception_file_sample.txt` | `--exception-file` | Sample exception-file format for denial testing |
+
+## Quick examples
+
+```bash
+./pm3 --offline -c 'emv terminal profile validate'
+./pm3 --offline -c 'emv terminal profile validate client/resources/emv_terminal_profile_interac.json'
+./pm3 -- emv terminal run -j --profile auto --host-sim --host-keys client/resources/interac_test_keys.json
+```
+
+See also [OPERATOR-GUIDE.md](../doc/planning/emv-terminal-emulator/OPERATOR-GUIDE.md).
+""")
+INNER
+# Minimal .gitignore allowlist for these resources only (no fixtures/codeql/docs fork noise)
+python3 <<'INNER'
+from pathlib import Path
+p = Path(".gitignore")
+text = p.read_text()
+block = """
+# EMV terminal lab resources (tracked JSON)
+!client/resources/emv_terminal_profile.json
+!client/resources/emv_terminal_profile_interac.json
+!client/resources/host_sim_interac.json
+!client/resources/interac_test_keys.json
+!client/resources/terminal_aid_candidates.json
+!client/resources/exception_file_sample.txt
+!client/resources/scheme_profiles/
+!client/resources/scheme_profiles/*.json
+!client/resources/README-emv-terminal.md
+"""
+if "emv_terminal_profile.json" not in text:
+    # insert after existing resources json exceptions if present, else before docs section
+    anchor = "!client/resources/calypso/*.json\n"
+    if anchor in text:
+        text = text.replace(anchor, anchor + block.lstrip("\n"), 1)
+    else:
+        text += "\n" + block
+    p.write_text(text)
+INNER
+git add client/resources .gitignore
+git commit -m "chore(emv): add user-facing terminal profiles and scheme resources
+
+Runtime profiles, scheme JSON, and public Interac lab test keys for
+operators. No C sources and no internal planning / fixture notes."
 
 echo "=== PR3a: feat/emv-terminal-core-phases ==="
 git checkout -B cursor/upstream-pr-3a-phases-e836 cursor/upstream-pr-2-resources-e836
@@ -336,6 +418,19 @@ git checkout "$INTEGRATED" -- \
 strip_makefile_terminal_3b
 write_cryptotest_terminal 3a
 git checkout "$INTEGRATED" -- client/src/emv/test/terminal_test_util.h
+# Golden/unit-test fixture JSON only (no internal README / template notes)
+git checkout "$INTEGRATED" -- client/src/emv/test/fixtures
+find client/src/emv/test/fixtures -name 'README.md' -delete
+find client/src/emv/test/fixtures -name '*.template' -delete
+# gitignore allowlist for fixtures
+python3 <<'INNER'
+from pathlib import Path
+p = Path(".gitignore")
+text = p.read_text()
+if "emv/test/fixtures" not in text:
+    text += "\n!client/src/emv/test/fixtures/\n!client/src/emv/test/fixtures/**/*.json\n"
+    p.write_text(text)
+INNER
 git add -A
 git commit -m "feat(emv): terminal emulator phase engine and offline unit tests
 
@@ -391,11 +486,11 @@ for f in armsrc/iso14443b.c include/protocols.h include/iso14b.h client/src/cmdh
     fi
 done
 git add -A
-git commit -m "feat(emv): emv terminal CLI, operator docs, and CI fixes
+git commit -m "feat(emv): emv terminal CLI and CI fixes
 
-User-facing emv terminal command tree, crypto playground CLI, operator
-guide, offline test hooks, MinGW-safe strings, cmake source sync, and
-CodeQL tuning for historic EMV interop algorithms."
+User-facing emv terminal command tree, crypto playground CLI, offline
+test hooks, MinGW-safe strings, cmake source sync, and CodeQL tuning for
+historic EMV interop algorithms. Operator guide is in PR 1."
 
 echo "=== Done. Branches:"
 git branch --list 'cursor/upstream-pr-*'
